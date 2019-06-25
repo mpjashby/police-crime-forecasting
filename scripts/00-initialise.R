@@ -5,7 +5,9 @@
 
 # load packages
 library("crimedata") # crime data
-library("fpp2")      # forecasting
+library("fable")     # forecasting
+library("feasts")    # also forecasting
+library("fasster")   # yet more forecasting
 library("ggrepel")   # repelled text labels
 library("ggridges")  # ridge plots
 library("lubridate") # handle dates

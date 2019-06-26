@@ -171,7 +171,7 @@ models_by_date$accuracy <- pmap(
 
 # SAVE MODELS
 models_by_date %>% 
-	select(forecast_date, forecasts, accuracy) %>% 
+	select(forecast_date, training_data, test_data, forecasts, accuracy) %>% 
 	write_rds("data_output/models_h2.Rds", compress = "gz")
 
 

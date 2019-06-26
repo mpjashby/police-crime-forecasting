@@ -115,7 +115,15 @@ models_by_month$forecasts <- map(
 models_by_month$accuracy <- pmap(
 	list(models_by_month$forecasts, models_by_month$training_data, 
 			 models_by_month$test_data), 
-	~ accuracy(..1, rbind(..2, ..3))
+	# ~ accuracy(..1, rbind(..2, ..3))
+	~ left_join(
+		accuracy(..1, rbind(..2, ..3)),
+		as_tibble(..1) %>% 
+			group_by(city_name, .model) %>% 
+			summarise(coef_var = mean(coef_variation)) %>% 
+			ungroup(),
+		by = c("city_name", ".model")
+	)
 )
 
 

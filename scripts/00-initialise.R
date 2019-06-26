@@ -4,6 +4,7 @@
 
 
 # load packages
+library("cowplot")   # marginal plots
 library("crimedata") # crime data
 library("fable")     # forecasting
 library("feasts")    # also forecasting

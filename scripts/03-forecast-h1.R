@@ -73,7 +73,8 @@ system.time(
 		# stl_nai = decomposition_model(STL, crimes ~ trend() + season(),
 		# 													SNAIVE(season_adjust)),
 		stl = decomposition_model(STL, crimes ~ trend() + season(),
-															ETS(season_adjust), robust = TRUE),
+															ETS(season_adjust), 
+															dcmp_args = list(robust = TRUE)),
 		ets = ETS(crimes ~ trend() + season() + error()),
 		arima = ARIMA(crimes ~ trend() + season()),
 		# var models excluded because they are much worse than the others, which is
@@ -116,6 +117,13 @@ models_by_month$accuracy <- pmap(
 			 models_by_month$test_data), 
 	~ accuracy(..1, rbind(..2, ..3))
 )
+
+
+
+# SAVE MODELS
+models_by_month %>% 
+	select(forecast_date, forecasts, accuracy) %>% 
+	write_rds("data_output/models_h1.Rds", compress = "gz")
 
 
 

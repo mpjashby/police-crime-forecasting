@@ -102,15 +102,19 @@ system.time(
 		models_by_date$training_data, model,
 		naive = NAIVE(crimes ~ lag()),
 		tslm = TSLM(crimes ~ trend() + season() + holiday + month_last + year_last),
-		# stl = decomposition_model(STL, crimes ~ trend() + season(), 
-		# 													ETS(season_adjust), ETS(season_year), robust = TRUE),
+		stl = decomposition_model(STL, crimes ~ trend() + season(),
+															ETS(season_adjust), ETS(season_year),
+															dcmp_args = list(robust = TRUE)),
 		ets = ETS(crimes ~ trend() + season() + error()),
-		arima = ARIMA(crimes ~ trend() + season() + holiday + month_last + year_last),
-		neural = NNETAR(crimes ~ trend() + season() + AR() + holiday + month_last + year_last),
-		fasster = FASSTER(crimes ~ poly(1) + trig(7) + ARMA() + holiday + month_last + year_last),
+		arima = ARIMA(crimes ~ trend() + season() + holiday + month_last + 
+										year_last),
+		neural = NNETAR(crimes ~ trend() + season() + AR() + holiday + month_last + 
+											year_last),
+		fasster = FASSTER(crimes ~ poly(1) + trig(7) + ARMA() + holiday + 
+												month_last + year_last),
 		.progress = TRUE
 	) %>%
-		map(mutate, combo = (arima + ets + fasster) / 3)
+		map(mutate, combo = (arima + ets + stl + fasster) / 4)
 )
 
 
@@ -162,6 +166,13 @@ models_by_date$accuracy <- pmap(
 		by = c("city_name", ".model")
 	)
 )
+
+
+
+# SAVE MODELS
+models_by_date %>% 
+	select(forecast_date, forecasts, accuracy) %>% 
+	write_rds("data_output/models_h2.Rds", compress = "gz")
 
 
 

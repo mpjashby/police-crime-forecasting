@@ -121,33 +121,37 @@ system.time(
 
 # CALCULATE FORECASTS
 
-models_by_date$forecasts <- furrr::future_map2(
-	models_by_date$models, models_by_date$forecast_date,
-	function (x, y) {
-		
-		# generate tsibble of new data for 90 days starting on the forecast date
-		new_data <- expand.grid(
-			city_name = as.character(unique(x$city_name)),
-			date = seq.Date(y, y + days(89), by = "days")
-		) %>% 
-			arrange(city_name, date) %>% 
-			mutate(
-				month_last = mday(date + days(1)) == 1,
-				year_last = yday(date + days(1)) == 1
-			) %>%
-			left_join(holiday_dates, by = "date") %>% 
-			mutate(holiday = ifelse(is.na(holiday), FALSE, holiday)) %>% 
-			as_tsibble(index = date, key = city_name)
-		
-		# forecast based on new data
-		forecast(x, new_data = new_data, bias_adjust = FALSE, times = 0) %>% 
-			mutate(
-				coef_variation = map_dbl(.distribution, 
-																 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
-			)
-		
-	},
-	.progress = TRUE
+system.time(
+	models_by_date$forecasts <- furrr::future_map2(
+		models_by_date$models, models_by_date$forecast_date,
+		function (x, y) {
+			
+			# generate tsibble of new data for 90 days starting on the forecast date
+			new_data <- expand.grid(
+				city_name = as.character(unique(x$city_name)),
+				date = seq.Date(y, y + days(89), by = "days")
+			) %>% 
+				arrange(city_name, date) %>% 
+				mutate(
+					month_last = mday(date + days(1)) == 1,
+					year_last = yday(date + days(1)) == 1
+				) %>%
+				left_join(holiday_dates, by = "date") %>% 
+				mutate(holiday = ifelse(is.na(holiday), FALSE, holiday)) %>% 
+				as_tsibble(index = date, key = city_name)
+			
+			# forecast based on new data
+			# This is very slow for NNETAR() models because prediction intervals are
+			# calculated by simulation. Set times = 0 to suppress simulations.
+			forecast(x, new_data = new_data, bias_adjust = FALSE) %>% 
+				mutate(
+					coef_variation = map_dbl(.distribution, 
+																	 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
+				)
+			
+		},
+		.progress = TRUE
+	)
 )
 
 
@@ -169,9 +173,20 @@ models_by_date$accuracy <- pmap(
 
 
 
+# PORTMANTEAU TESTS
+
+models_by_date$portmanteau <- map(models_by_date$models, function (x) {
+	x %>% 
+		augment(type = "response") %>% 
+		# lag = 10 chosen following https://robjhyndman.com/hyndsight/ljung-box-test/
+		features(.resid, portmanteau_tests, lag = 10)
+})
+
+
+
 # SAVE MODELS
 models_by_date %>% 
-	select(forecast_date, training_data, test_data, forecasts, accuracy) %>% 
+	select(-models) %>% 
 	write_rds("data_output/models_h2.Rds", compress = "gz")
 
 

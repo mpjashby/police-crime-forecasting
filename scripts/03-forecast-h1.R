@@ -128,8 +128,19 @@ models_by_month$accuracy <- pmap(
 
 
 
+# PORTMANTEAU TESTS
+
+models_by_month$portmanteau <- map(models_by_month$models, function (x) {
+	x %>% 
+		augment(type = "response") %>% 
+		# lag = 10 chosen following https://robjhyndman.com/hyndsight/ljung-box-test/
+		features(.resid, portmanteau_tests, lag = 10)
+})
+
+
+
 # SAVE MODELS
 models_by_month %>% 
-	select(forecast_date, training_data, test_data, forecasts, accuracy) %>% 
+	select(-models) %>% 
 	write_rds("data_output/models_h1.Rds", compress = "gz")
 

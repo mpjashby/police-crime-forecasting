@@ -12,6 +12,7 @@ library("fasster")   # yet more forecasting
 library("ggrepel")   # repelled text labels
 library("ggridges")  # ridge plots
 library("lubridate") # handle dates
+library("fable.prophet") # Facebook forecasting
 library("sf")        # spatial processing 
 library("tsibble")   # tidy time series
 library("tidyverse") # utility functions, **load this after all other packages**

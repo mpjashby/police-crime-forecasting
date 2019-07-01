@@ -21,10 +21,25 @@ if (!exists("crimes")) {
 
 # PREPARE DATA
 
+# get holiday dates
+holiday_dates <- tibble(
+	date = as_date(timeDate::holidayNYSE(2010:2018)),
+	holiday = TRUE
+)
+
 # count crimes per month in each city
 crimes_by_month <- crimes %>% 
-	mutate(month = yearmonth(date_single)) %>%
-	count(city_name, month, name = "crimes") %>%
+	mutate(date = as_date(date_single)) %>%
+	count(city_name, date, name = "crimes") %>%
+	mutate(
+		month = yearmonth(date),
+		weekday = ifelse(!wday(date, TRUE) %in% c("Sat", "Sun"), TRUE, FALSE)
+	) %>% 
+	left_join(holiday_dates, by = "date") %>% 
+	group_by(city_name, month) %>% 
+	summarise(crimes = sum(crimes), count_weekdays = sum(weekday), 
+						count_holidays = sum(holiday, na.rm = TRUE)) %>% 
+	ungroup() %>% 
 	as_tsibble(index = month, key = city_name)
 
 # create tsibble to hold model results and separate data into training/test sets
@@ -69,24 +84,30 @@ system.time(
 	models_by_month$models <- furrr::future_map(
 		models_by_month$training_data, model,
 		naive = NAIVE(crimes ~ lag()),
-		tslm = TSLM(crimes ~ trend() + season()),
-		# stl_nai = decomposition_model(STL, crimes ~ trend() + season(),
-		# 													SNAIVE(season_adjust)),
+		common1 = RW(crimes ~ lag(12)),
+		common2 = RW(crimes ~ lag(24)),
+		common3 = RW(crimes ~ lag(36)),
+		tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
 		stl = decomposition_model(STL, crimes ~ trend() + season(),
 															ETS(season_adjust), 
 															dcmp_args = list(robust = TRUE)),
 		ets = ETS(crimes ~ trend() + season() + error()),
-		arima = ARIMA(crimes ~ trend() + season()),
+		arima = ARIMA(crimes ~ trend() + season() + count_weekdays + 
+										count_holidays),
 		# var models excluded because they are much worse than the others, which is
 		# interesting but makes seeing the relative differences in accuracy between
 		# the other models difficult to see on a plot
 		# var = VAR(crimes ~ trend() + season() + AR()),
-		neural = NNETAR(crimes ~ trend() + season() + AR()),
-		fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA()),
-		# fasster_sea = FASSTER(crimes ~ poly(2) + trig(12) + ARMA()),
+		neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + 
+											count_holidays),
+		fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + count_weekdays + 
+												count_holidays),
+		prophet = prophet(crimes ~ season("year") + count_weekdays + count_holidays),
 		.progress = TRUE
 	) %>%
-		map(mutate, combo = (arima + ets + fasster + stl) / 4)
+		map(mutate, combo = (arima + ets + fasster + stl) / 4, 
+				common = (common1 + common2 + common3) / 3) %>% 
+		map(mutate, common1 = NULL, common2 = NULL, common3 = NULL)
 )
 
 # models_by_month$models <- models_by_month$models %>%
@@ -96,17 +117,53 @@ system.time(
 
 # CALCULATE FORECASTS
 
-models_by_month$forecasts <- map(
-	models_by_month$models, 
-	forecast, h = "3 years", bias_adjust = FALSE, times = 0
-) %>% 
-	map(function (x) {
-		mutate(
-			x,
-			coef_variation = map_dbl(.distribution, 
-															 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
-		)
-	})
+# models_by_month$forecasts <- map(
+# 	models_by_month$models, 
+# 	forecast, h = "3 years", bias_adjust = FALSE, times = 0
+# ) %>% 
+# 	map(function (x) {
+# 		mutate(
+# 			x,
+# 			coef_variation = map_dbl(.distribution, 
+# 															 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
+# 		)
+# 	})
+
+system.time(
+	models_by_month$forecasts <- furrr::future_map2(
+		models_by_month$models, models_by_month$forecast_date,
+		function (x, y) {
+			
+			# generate tsibble of new data for 90 days starting on the forecast date
+			new_data <- expand.grid(
+				city_name = as.character(unique(x$city_name)),
+				date = seq.Date(as_date(y), as_date(y) + years(3) - months(1), 
+												by = "days")
+			) %>% 
+				mutate(
+					month = yearmonth(date),
+					weekday = ifelse(!wday(date, TRUE) %in% c("Sat", "Sun"), TRUE, FALSE)
+				) %>% 
+				left_join(holiday_dates, by = "date") %>% 
+				group_by(city_name, month) %>% 
+				summarise(count_weekdays = sum(weekday), 
+									count_holidays = sum(holiday, na.rm = TRUE)) %>% 
+				ungroup() %>% 
+				as_tsibble(index = month, key = city_name)
+			
+			# forecast based on new data
+			# This is very slow for NNETAR() models because prediction intervals are
+			# calculated by simulation. Set times = 0 to suppress simulations.
+			forecast(x, new_data = new_data, bias_adjust = FALSE) %>% 
+				mutate(
+					coef_variation = map_dbl(.distribution, 
+																	 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
+				)
+			
+		},
+		.progress = TRUE
+	)
+)
 
 
 

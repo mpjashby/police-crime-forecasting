@@ -31,9 +31,9 @@ coef_var <- function (dist) {
 	# fcdist objects can either be a two-item list with mean and SD, or a numeric
 	# vector of bootstrapped samples
 	if (length(dist[[1]][[1]]) > 1 & is.numeric(dist[[1]][[1]])) {
-		sd(dist[[1]][[1]]) / mean(dist[[1]][[1]])
+		sd(dist[[1]][[1]]) / abs(mean(dist[[1]][[1]]))
 	} else if (has_name(dist, "mean") & has_name(dist, "sd")) {
-		dist$sd / dist$mean
+		dist$sd / abs(dist$mean)
 	} else {
 		NA_real_
 	}

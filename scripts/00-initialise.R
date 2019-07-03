@@ -9,8 +9,9 @@ library("crimedata") # crime data
 library("fable")     # forecasting
 library("feasts")    # also forecasting
 library("fasster")   # yet more forecasting
-library("ggrepel")   # repelled text labels
-library("ggridges")  # ridge plots
+# library("ggrepel")   # repelled text labels
+# library("ggridges")  # ridge plots
+library("ggthemes")  # Tufte box plots
 library("lubridate") # handle dates
 library("fable.prophet") # Facebook forecasting
 library("sf")        # spatial processing 
@@ -19,104 +20,22 @@ library("tidyverse") # utility functions, **load this after all other packages**
 
 
 
-# function for calculating absolute percentage error
-# mape <- function (actual, predicted) {
-# 	map2_dbl(actual, predicted, ~ mean(abs((.x - .y) / .x)))
-# }
-ape <- function (actual, predicted) {
-	map2(actual, predicted, function (x, y) {
-		x <- as.numeric(x)
-		y %>% 
-			mutate(error = abs((point_forecast - x) / x)) %>% 
-			select(month = rowname, step, error)
-	})
-}
-
-
-# function to extract training data from time series
-extract_training_data <- function (series, end_date) {
-	window(
-		series, 
-		start = c(year(end_date - years(5)), month(end_date + months(1))), 
-		end = c(year(end_date), month(end_date))
-	)
-}
-
-
-# function to extract forecasts for particular steps ahead
-steps_ahead <- function (data, ...) {
-	slice(data, ...)
-}
-
-
-# function to convert a forecast object to a tibble
-forecast_to_tibble <- function (x) {
-	x %>% 
-		as.data.frame() %>% 
-		rownames_to_column() %>% 
-		as_tibble() %>% 
-		janitor::clean_names() %>% 
-		mutate(step = row_number()) %>% 
-		select(step, everything())
-}
-
-
-# function to convert a forecast object to a tsibble
-forecast_to_tsibble <- function (x) {
-	x %>% 
-		as.data.frame() %>% 
-		rownames_to_column(var = "forecast_period") %>% 
-		as_tibble() %>% 
-		janitor::clean_names() %>% 
-		mutate(
-			forecast_period = date(parsedate::parse_date(forecast_period)),
-			step = row_number()
-		) %>% 
-		select(step, everything())
-}
-
-
-# function to combine forecast with the data used to produce it
-combine_forecast_data <- function (model, data) {
+# function for extracting the coefficient of variation from an `fcdist` object
+coef_var <- function (dist) {
 	
-	# convert time series into tibble
-	model_data <- stats:::.preformat.ts(data) %>% 
-		as_tibble(rownames = "year") %>% 
-		gather(key = "month", value = "crimes", -year) %>% 
-		mutate(
-			crimes = as.numeric(crimes),
-			period = paste(month, year),
-			date = ymd(paste(year, month, "01"))
-		) %>% 
-		arrange(year)
+	stopifnot(inherits(dist, "fcdist"))
 	
-	# convert forecast object into tibble
-	model_forecast <- as.data.frame(model) %>% 
-		janitor::clean_names() %>% 
-		as_tibble(rownames = "period")
+	# only the first element of the object is of interest
+	dist <- dist[[1]]
 	
-	# join data to forecasts
-	left_join(model_data, model_forecast, by = "period")
-	
+	# fcdist objects can either be a two-item list with mean and SD, or a numeric
+	# vector of bootstrapped samples
+	if (length(dist[[1]][[1]]) > 1 & is.numeric(dist[[1]][[1]])) {
+		sd(dist[[1]][[1]]) / mean(dist[[1]][[1]])
+	} else if (has_name(dist, "mean") & has_name(dist, "sd")) {
+		dist$sd / dist$mean
+	} else {
+		NA_real_
+	}
+
 }
-
-
-# plot the accuracy of a forecast, using the output of combine_forecast_data()
-# as the input
-plot_forecast_accuracy <- function (model_data, title) {
-	
-	ggplot(model_data, aes(x = date, y = crimes)) +
-		geom_ribbon(aes(ymin = lo_95, ymax = hi_95), fill = "grey85") +
-		geom_ribbon(aes(ymin = lo_80, ymax = hi_80), fill = "grey70") +
-		geom_line(aes(y = point_forecast), linetype = "11", na.rm = TRUE) +
-		geom_line() +
-		scale_y_continuous(limits = c(0, NA)) +
-		labs(
-			title = title,
-			x = NULL,
-			y = "number of crimes"
-		) +
-		theme_minimal()
-	
-}
-

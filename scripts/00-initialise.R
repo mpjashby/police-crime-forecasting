@@ -23,10 +23,10 @@ library("tidyverse") # utility functions, **load this after all other packages**
 # function for extracting the coefficient of variation from an `fcdist` object
 coef_var <- function (dist) {
 	
-	stopifnot(inherits(dist, "fcdist"))
+	# stopifnot(inherits(dist, "fcdist"))
 	
 	# only the first element of the object is of interest
-	dist <- dist[[1]]
+	# dist <- dist[[1]]
 	
 	# fcdist objects can either be a two-item list with mean and SD, or a numeric
 	# vector of bootstrapped samples

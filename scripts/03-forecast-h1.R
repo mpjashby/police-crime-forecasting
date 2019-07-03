@@ -155,10 +155,7 @@ system.time(
 			# This is very slow for NNETAR() models because prediction intervals are
 			# calculated by simulation. Set times = 0 to suppress simulations.
 			forecast(x, new_data = new_data, bias_adjust = FALSE) %>% 
-				mutate(
-					coef_variation = map_dbl(.distribution, 
-																	 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
-				)
+				mutate(coef_variation = map_dbl(.distribution, coef_var))
 			
 		},
 		.progress = TRUE
@@ -199,5 +196,6 @@ models_by_month$portmanteau <- map(models_by_month$models, function (x) {
 # SAVE MODELS
 models_by_month %>% 
 	select(-models) %>% 
+	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>% 
 	write_rds("data_output/models_h1.Rds", compress = "gz")
 

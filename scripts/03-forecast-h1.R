@@ -44,7 +44,7 @@ crimes_by_month <- crimes %>%
 
 # create tsibble to hold model results and separate data into training/test sets
 models_by_month <- tsibble(
-	forecast_date = yearmonth(seq.Date(ymd("2013-01-01"), ymd("2015-12-31"), 
+	forecast_date = yearmonth(seq.Date(ymd("2013-03-01"), ymd("2015-12-31"), 
 																		 by = "months")), 
 	index = forecast_date
 ) %>% 
@@ -52,12 +52,12 @@ models_by_month <- tsibble(
 		training_data = map(
 			as_date(forecast_date), 
 			~ filter(crimes_by_month, 
-							 between(as_date(month), . - years(3), . - months(1)))
+							 between(as_date(month), . - months(38), .))
 		),
 		test_data = map(
 			as_date(forecast_date),
 			~ filter(crimes_by_month,
-							 between(as_date(month), ., . + years(3) - months(1)))
+							 between(as_date(month), . + months(1), . + years(3)))
 		)
 	)
 
@@ -78,15 +78,15 @@ models_by_month <- tsibble(
 
 # RUN MODELS
 
-future::plan("multiprocess")
+# future::plan("multiprocess")
 
 system.time(
 	models_by_month$models <- furrr::future_map(
 		models_by_month$training_data, model,
 		naive = NAIVE(crimes ~ lag()),
-		common1 = RW(crimes ~ lag(12)),
-		common2 = RW(crimes ~ lag(24)),
-		common3 = RW(crimes ~ lag(36)),
+		# common1 = RW(crimes ~ lag(12)),
+		# common2 = RW(crimes ~ lag(24)),
+		# common3 = RW(crimes ~ lag(36)),
 		tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
 		stl = decomposition_model(STL, crimes ~ trend() + season(),
 															ETS(season_adjust), 
@@ -105,9 +105,9 @@ system.time(
 		prophet = prophet(crimes ~ season("year") + count_weekdays + count_holidays),
 		.progress = TRUE
 	) %>%
-		map(mutate, combo = (arima + ets + fasster + stl) / 4, 
-				common = (common1 + common2 + common3) / 3) %>% 
-		map(mutate, common1 = NULL, common2 = NULL, common3 = NULL)
+		map(mutate, combo = (arima + ets + fasster + stl) / 4)
+				# common = (common1 + common2 + common3) / 3)
+		# map(mutate, common1 = NULL, common2 = NULL, common3 = NULL)
 )
 
 # models_by_month$models <- models_by_month$models %>%

@@ -3,7 +3,13 @@
 # this file and all custom function defined here.
 
 
+# if needed, install non-CRAN packages
+remotes::install_github("abresler/nbastatR")
+remotes::install_github("baseballr")
+remotes::install_github("maksimhorowitz/nflscrapR")
+
 # load packages
+library("baseballr") # MLB data
 library("cowplot")   # marginal plots
 library("crimedata") # crime data
 library("fable")     # forecasting
@@ -14,6 +20,8 @@ library("fasster")   # yet more forecasting
 library("ggthemes")  # Tufte box plots
 library("lubridate") # handle dates
 library("fable.prophet") # Facebook forecasting
+library("nbastatR")  # NBA data
+library("nflscrapR") # NFL data
 library("sf")        # spatial processing 
 library("tsibble")   # tidy time series
 library("tidyverse") # utility functions, **load this after all other packages**

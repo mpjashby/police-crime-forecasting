@@ -7,6 +7,7 @@
 remotes::install_github("abresler/nbastatR")
 remotes::install_github("baseballr")
 remotes::install_github("maksimhorowitz/nflscrapR")
+remotes::install_github("mitchelloharawild/fable.prophet")
 
 # load packages
 library("baseballr") # MLB data
@@ -47,3 +48,14 @@ coef_var <- function (dist) {
 	}
 
 }
+
+
+# identify dummy variables used to train models
+training_vars <- function (x) {
+	
+	dimnames(x$tslm[[1]]$fit$coef)[[1]] %>% 
+		str_remove("TRUE$") %>% 
+		str_subset("\\(", negate = TRUE)
+	
+}
+

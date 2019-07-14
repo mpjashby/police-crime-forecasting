@@ -103,7 +103,8 @@ system.time(
 											count_holidays),
 		fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + count_weekdays + 
 												count_holidays),
-		prophet = prophet(crimes ~ season("year") + count_weekdays + count_holidays),
+		prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + 
+												count_holidays),
 		.progress = TRUE
 	) %>%
 		map(mutate, combo = (arima + ets + fasster + stl) / 4)

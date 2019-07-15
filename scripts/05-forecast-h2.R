@@ -135,7 +135,7 @@ system.time(
 					fasster = FASSTER(as.formula(paste(c("crimes ~ poly(1) + trig(7) + ARMA()", xreg_vars), collapse = " + "))),
 					prophet = prophet(as.formula(paste(c("crimes ~ growth() + season('year') + season('week')", xreg_vars), collapse = " + ")))
 				) %>% 
-					mutate(combo = (arima + ets + stl + fasster) / 4)
+					mutate(combo = (arima + prophet + tslm) / 3)
 				
 		})
 	})

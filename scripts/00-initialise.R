@@ -5,7 +5,7 @@
 
 # if needed, install non-CRAN packages
 remotes::install_github("abresler/nbastatR")
-remotes::install_github("baseballr")
+remotes::install_github("BillPetti/baseballr")
 remotes::install_github("maksimhorowitz/nflscrapR")
 remotes::install_github("mitchelloharawild/fable.prophet")
 

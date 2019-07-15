@@ -108,7 +108,7 @@ future::plan("multiprocess")
 
 system.time(
 	models_by_date$models <- map(
-		models_by_date$training_data[1], function (x) {
+		models_by_date$training_data, function (x) {
 			map(as.character(unique(x$city_name)), function (y) {
 				
 				training_data <- x %>% 
@@ -173,7 +173,7 @@ system.time(
 
 system.time(
 	models_by_date$forecasts <- map2(
-		models_by_date$models[1], models_by_date$forecast_date[1],
+		models_by_date$models, models_by_date$forecast_date,
 		function (x, y) {
 			
 			# generate tsibble of new data for 90 days starting on the forecast date
@@ -301,5 +301,7 @@ models_by_date$portmanteau <- map(models_by_date$models, map, function (x) {
 # SAVE MODELS
 models_by_date %>% 
 	select(-models) %>% 
+	mutate(forecasts = map_depth(forecasts, 2, 
+															 ~select(as_tibble(.), -.distribution))) %>% 
 	write_rds("data_output/models_h2.Rds", compress = "gz")
 

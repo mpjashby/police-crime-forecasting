@@ -4,10 +4,14 @@
 
 
 # if needed, install non-CRAN packages
-remotes::install_github("abresler/nbastatR")
-remotes::install_github("BillPetti/baseballr")
-remotes::install_github("maksimhorowitz/nflscrapR")
-remotes::install_github("mitchelloharawild/fable.prophet")
+if (!"nbastatR" %in% installed.packages())
+	remotes::install_github("abresler/nbastatR")
+if (!"baseballr" %in% installed.packages())
+	remotes::install_github("BillPetti/baseballr")
+if (!"nflscrapR" %in% installed.packages())
+	remotes::install_github("maksimhorowitz/nflscrapR")
+if (!"fable.prophet" %in% installed.packages())
+	remotes::install_github("mitchelloharawild/fable.prophet")
 
 # load packages
 library("baseballr") # MLB data

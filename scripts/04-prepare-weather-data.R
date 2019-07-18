@@ -41,45 +41,102 @@ weather_stations <- tribble(
 	"GHCND:USW00023174", "LOS ANGELES INTERNATIONAL AIRPORT, CA US", "Los Angeles",
 	"GHCND:USC00154958", "LOUISVILLE WEATHER FORECAST OFFICE, KY US", "Louisville",
 	"GHCND:USW00094728", "NY CITY CENTRAL PARK, NY US", "New York",
-	"GHCND:USC00047767", "SAN FRANCISCO OCEANSIDE, CA US", "San Francisco",
+	"GHCND:USW00023234", "SAN FRANCISCO INTERNATIONAL AIRPORT, CA US", "San Francisco",
 	"GHCND:USW00023160", "TUCSON INTERNATIONAL AIRPORT, AZ US", "Tucson"
 )
 
-# get data
+# define function to return GHCND data as a tibble
 # ncdc() can only retrieve 1,000 rows of data, which with 10 cities and four
 # data types equates to 25 days of data
+get_weather <- function (date, stations) {
+	
+	pluck(ncdc(
+		datasetid = "GHCND", 
+		datatypeid = c("PRCP", "SNOW", "TMAX", "TMIN"), 
+		stationid = stations,
+		startdate = format(date, "%F"), 
+		enddate = format(date + days(24), "%F"),
+		limit = 1000
+	), "data")
+
+}
+
+# get data
 # details of the row data format are at 
 # <ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/readme.txt>
 weather_data <- seq.Date(ymd("2010-01-01"), ymd("2018-12-31"), 
 												 by = "25 days") %>% 
 	map_dfr(
-	function (x) {
-		
-		message(paste("Getting data for 25 days starting", format(x, "%d %b %Y")), 
-						appendLF = TRUE)
+		function (x) {
+			
+			message(paste("Getting data for 25 days starting", format(x, "%d %b %Y")), 
+							appendLF = TRUE)
+			
+			get_weather(x, weather_stations$station)
+			
+		})
 
-		pluck(ncdc(
-			datasetid = "GHCND", 
-			datatypeid = c("PRCP", "SNOW", "TMAX", "TMIN"), 
-			stationid = weather_stations$station,
-			startdate = format(x, "%F"), 
-			enddate = format(x + days(24), "%F"),
-			limit = 1000
-		), "data")
-		
-	}) %>% 
+# SFO data are missing for a period so these records can be replaced by values
+# from a different site, which can't be used overall because of other missing
+# data but which does have values for all the dates when SFO data are missing
+sf_weather_data <- get_weather(ymd("2018-06-22"), "GHCND:USW00023272")
+
+# add the replacement SF data to the main dataset
+weather_data_processed <- rbind(
+	filter(
+		weather_data, 
+		!(station == "GHCND:USW00023234" & 
+				between(as_date(parse_datetime(date)), ymd("2018-06-22"), 
+								ymd("2018-07-11")))
+	),
+	filter(sf_weather_data, between(as_date(parse_datetime(date)), 
+																	ymd("2018-06-22"), ymd("2018-07-11")))
+) %>% 
+	arrange(date)
+
+# process data
+weather_data_processed <- weather_data_processed %>% 
 	left_join(weather_stations, by = "station") %>% 
-	filter(between(date, ymd("2010-01-01"), ymd("2018-12-31"))) %>% 
-	select(-fl_m, -fl_q, -fl_so, -fl_t, -station, -station_name) %>% 
-	spread(datatype, value) %>% 
-	janitor::clean_names() %>% 
-	# LA data don't have values for snow because it hasn't snowed there since 1961
+	mutate(city = ifelse(station == "GHCND:USW00023272", "San Francisco", 
+											 city)) %>% 
+	select(-fl_m, -fl_q, -fl_so, -fl_t, -station, -station_name) %>%
+	spread(datatype, value) %>%
+	janitor::clean_names() %>%
+	# snow is very rare and seems to be very often missing from the data, so if
+	# there is no snow value set it to zero (LA data don't have values for snow 
+	# at all because it hasn't snowed there since 1961)
 	mutate(
 		date = as_date(date),
 		snow = ifelse(is.na(snow), 0, snow)
-	) %>% 
+	) %>%
+	filter(between(date, ymd("2010-01-01"), ymd("2018-12-31"))) %>%
 	# precipitation and temperature values are in tenths of units (mm and ºC)
-	mutate_at(vars("prcp", "tmax", "tmin"), ~ . / 10)
+	mutate_at(vars("prcp", "tmax", "tmin"), ~ . / 10) %>% 
+	as_tsibble(key = city, index = date)
+
+# report missing data
+weather_data_processed %>% 
+	as_tibble() %>% 
+	filter_all(any_vars(is.na(.))) %>% 
+	arrange(city, date) %>% 
+	write_csv(here::here("fig_output/missing_weather_data.csv"))
+
+# impute missing data
+weather_data_imputed <- weather_data_processed %>% 
+	# some dates are missing from the data altogether, so we add these
+	fill_gaps() %>% 
+	# if only some data are missing for a day, the row will exist but the missing
+	# values will be NA, which we replace with the rolling mean of a seven-day
+	# period centred on the missing date
+	mutate_if(
+		is.numeric, 
+		~ ifelse(
+			is.na(.), 
+			mean(c(lag(., 3), lag(., 2), lag(.), lead(.), lead(., 2), lead(., 3)), 
+					 na.rm = TRUE), 
+			.
+		)
+	)
 
 # save data
-write_csv(weather_data, here::here("data_output/weather_data.csv.gz"))
+write_csv(weather_data_imputed, here::here("data_output/weather_data.csv.gz"))

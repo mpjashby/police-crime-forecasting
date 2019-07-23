@@ -104,8 +104,6 @@ models_by_date <- tibble(
 
 # RUN MODELS
 
-future::plan("multiprocess")
-
 system.time(
 	models_by_date$models <- map(
 		models_by_date$training_data, function (x) {
@@ -140,32 +138,6 @@ system.time(
 		})
 	})
 )
-
-# system.time(
-# 	models_by_date$models <- map(
-# 		models_by_date$training_data, model,
-# 		naive = NAIVE(crimes ~ lag()),
-# 		snaive = SNAIVE(crimes ~ lag("week")),
-# 		tslm = TSLM(crimes ~ trend() + season() + holiday + mlb + nfl + fbs + nba + 
-# 									nhl + mls + auto + month_last + year_last),
-# 		stl = decomposition_model(STL, crimes ~ trend() + season(),
-# 															ETS(season_adjust), ETS(season_year),
-# 															dcmp_args = list(robust = TRUE)),
-# 		ets = ETS(crimes ~ trend() + season() + error()),
-# 		arima = ARIMA(crimes ~ trend() + season() + holiday + mlb + nfl + fbs + 
-# 										nba + nhl + mls + auto + month_last + year_last),
-# 		neural = NNETAR(crimes ~ trend() + season() + AR() + holiday + mlb + nfl + 
-# 											fbs + nba + nhl + mls + auto + month_last + year_last,
-# 										MaxNWts = 2000),
-# 		fasster = FASSTER(crimes ~ poly(1) + trig(7) + ARMA() + holiday + mlb + 
-# 												nfl + fbs + nba + nhl + mls + auto + month_last + 
-# 												year_last),
-# 		prophet = prophet(crimes ~ growth() + season("year") + season("week") + 
-# 												holiday + mlb + nfl + fbs + nba + nhl + mls + auto + 
-# 												month_last + year_last)
-# 	) %>%
-# 		map(mutate, combo = (arima + ets + stl + fasster) / 4)
-# )
 
 
 
@@ -205,51 +177,12 @@ system.time(
 				# calculated by simulation. Set times = 0 to suppress simulations.
 				forecast(z, new_data = this_new_data, bias_adjust = FALSE) %>%
 					mutate(coef_variation = map_dbl(.distribution, coef_var))
-				  # mutate(
-					# 	coef_variation = map_dbl(
-					# 		.distribution,
-					# 		~ ifelse(length(.) > 0, .$sd / .$mean, NA)
-					# 	)
-					# )
 
 			})
 		
 		}
 	)
 )
-
-# system.time(
-# 	models_by_date$forecasts <- furrr::future_map2(
-# 		models_by_date$models, models_by_date$forecast_date,
-# 		function (x, y) {
-# 			
-# 			# generate tsibble of new data for 90 days starting on the forecast date
-# 			new_data <- expand.grid(
-# 				city_name = as.character(unique(x$city_name)),
-# 				date = seq.Date(y, y + days(89), by = "days")
-# 			) %>% 
-# 				arrange(city_name, date) %>% 
-# 				mutate(
-# 					month_last = mday(date + days(1)) == 1,
-# 					year_last = yday(date + days(1)) == 1
-# 				) %>%
-# 				left_join(holiday_dates, by = "date") %>% 
-# 				mutate(holiday = ifelse(is.na(holiday), FALSE, holiday)) %>% 
-# 				as_tsibble(index = date, key = city_name)
-# 			
-# 			# forecast based on new data
-# 			# This is very slow for NNETAR() models because prediction intervals are
-# 			# calculated by simulation. Set times = 0 to suppress simulations.
-# 			forecast(x, new_data = new_data, bias_adjust = FALSE) %>% 
-# 				mutate(
-# 					coef_variation = map_dbl(.distribution, 
-# 																	 ~ ifelse(length(.) > 0, .$sd / .$mean, NA))
-# 				)
-# 			
-# 		},
-# 		.progress = TRUE
-# 	)
-# )
 
 
 
@@ -271,19 +204,6 @@ models_by_date$accuracy <- pmap(
 		})
 	}
 )
-
-# models_by_date$accuracy <- test_accuracy <- pmap(
-# 	list(models_by_date$forecasts[1], models_by_date$training_data[1], 
-# 			 models_by_date$test_data[1]), 
-# 	~ left_join(
-# 		accuracy(..1, rbind(..2, ..3)),
-# 		as_tibble(..1) %>% 
-# 			group_by(city_name, .model) %>% 
-# 			summarise(coef_var = mean(coef_variation)) %>% 
-# 			ungroup(),
-# 		by = c("city_name", ".model")
-# 	)
-# )
 
 
 

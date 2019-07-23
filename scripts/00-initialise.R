@@ -27,6 +27,7 @@ library("lubridate") # handle dates
 library("fable.prophet") # Facebook forecasting
 library("nbastatR")  # NBA data
 library("nflscrapR") # NFL data
+library("rnoaa")     # weather data
 library("sf")        # spatial processing 
 library("tsibble")   # tidy time series
 library("tidyverse") # utility functions, **load this after all other packages**

@@ -150,7 +150,7 @@ models_by_shift <- tibble(
 
 system.time(
 	models_by_shift$models <- map(
-		models_by_shift$training_data[1], function (x) {
+		models_by_shift$training_data, function (x) {
 			map(as.character(unique(x$city_name)), function (y) {
 				
 				training_data <- x %>% 
@@ -204,7 +204,7 @@ system.time(
 system.time(
 	models_by_shift$forecasts <- map2(
 		# models_by_shift$models[1], as_datetime(models_by_shift$forecast_date[1]),
-		models_by_shift$models[1], models_by_shift$test_data[1],
+		models_by_shift$models, models_by_shift$test_data,
 		function (x, y) {
 			
 			# new_data <- expand.grid(
@@ -259,7 +259,7 @@ system.time(
 
 # CALCULATE THRESHOLD VALUES
 models_by_shift$thresholds <- map(
-	models_by_shift$training_data[1], function (x) {
+	models_by_shift$training_data, function (x) {
 		
 		x %>% 
 			as_tibble() %>% 
@@ -276,7 +276,7 @@ models_by_shift$thresholds <- map(
 
 # CALCULATE PROBABILTY OF SHIFT BEING EXTREME
 models_by_shift$forecasts <- map2(
-	models_by_shift$forecasts[1], models_by_shift$thresholds[1],
+	models_by_shift$forecasts, models_by_shift$thresholds,
 	function (x, y) {
 		
 		map(x, function (z) {

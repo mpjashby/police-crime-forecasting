@@ -162,16 +162,6 @@ accuracy_plot_a <- model_summary %>%
 			as.character(fct_rev(pluck(model_summary_means_a, "model_label")))
 		))
 	) %>%
-	arrange(as.numeric(model_label)) %>% 
-	group_by(city_name) %>% 
-	mutate(
-		city_label = ifelse(
-			model_label == last(model_label) & forecast_date == first(forecast_date), 
-			as.character(city_name), 
-			NA
-		)
-	) %>% 
-	ungroup() %>% 
 	ggplot(aes(model_label, mape)) + 
 	geom_hline(aes(yintercept = 0), colour = "grey67") + 
 	geom_tile(aes(x = 1, y = lo_acc + 0.5 * (hi_acc - lo_acc), 
@@ -182,15 +172,9 @@ accuracy_plot_a <- model_summary %>%
 										voffset = 0.005, width = 2, outlier.size = 0.25,
 										position = position_identity()) +
 	geom_hline(aes(yintercept = median_acc), data = model_summary_overall_means) +
-	geom_label(
-		aes(x = nrow(model_summary_overall_means), y = max(model_summary$mape), 
-				label = city_label), 
-		inherit.aes = FALSE, na.rm = TRUE, 
-		hjust = 1, vjust = 1, size = 8 / (14 / 5), lineheight = 0.9, label.size = NA 
-	) + 
 	scale_x_discrete(labels = parse_facet_label) +
 	scale_y_continuous(
-		limits = c(0, NA),
+		limits = c(0, as.numeric(quantile(model_summary$mape, 0.99))),
 		expand = c(0, 0),
 		labels = scales::percent_format(accuracy = 1)
 	) + 
@@ -209,6 +193,16 @@ accuracy_plot_b <- model_summary %>%
 			as.character(fct_rev(pluck(model_summary_means_b, "model_label")))
 		))
 	) %>%
+	arrange(as.numeric(model_label)) %>% 
+	group_by(city_name) %>% 
+	mutate(
+		city_label = ifelse(
+			model_label == last(model_label) & forecast_date == first(forecast_date), 
+			as.character(city_name), 
+			NA
+		)
+	) %>% 
+	ungroup() %>% 
 	ggplot(aes(model_label, abs(coef_var))) +
 	geom_hline(aes(yintercept = 0), colour = "grey67") + 
 	geom_tile(aes(x = 1, y = lo_cer + 0.5 * (hi_cer - lo_cer), 
@@ -219,9 +213,19 @@ accuracy_plot_b <- model_summary %>%
 										voffset = 0.005, width = 2, outlier.size = 0.25,
 										position = position_identity()) +
 	geom_hline(aes(yintercept = median_cer), data = model_summary_overall_means) +
+	geom_label(
+		aes(x = nrow(model_summary_overall_means), 
+				y = as.numeric(quantile(model_summary$coef_var, 0.99)), 
+				label = city_label), 
+		inherit.aes = FALSE, na.rm = TRUE, 
+		hjust = 1, vjust = 1, size = 8 / (14 / 5), lineheight = 0.9, label.size = NA 
+	) + 
 	coord_flip() +
 	scale_x_discrete(labels = parse_facet_label) +
-	scale_y_continuous(limits = c(0, NA), expand = c(0, 0)) + 
+	scale_y_continuous(
+		limits = c(0, as.numeric(quantile(abs(model_summary$coef_var), 0.99))), 
+		expand = c(0, 0)
+	) + 
 	facet_grid(rows = vars(city_name), scales = "free_y") +
 	labs(x = NULL, y = "coefficient of variation") +
 	theme_panel()
@@ -250,7 +254,10 @@ accuracy_plot_c <- model_summary %>%
 	geom_hline(aes(yintercept = 18.33), linetype = "21") + 
 	coord_flip() +
 	scale_x_discrete(labels = parse_facet_label) +
-	scale_y_continuous(limits = c(0, NA), expand = c(0, 0)) + 
+	scale_y_continuous(
+		limits = c(0, as.numeric(quantile(model_summary$lb_test, 0.99))), 
+		expand = c(0, 0)
+	) + 
 	scale_colour_manual(
 		values = c(`TRUE` = "grey33", `FALSE` = "grey60"),
 		# labels = c(`TRUE` = bquote(italic(p)<0.05 ~ "in" ~ phantom()>plain(`95%`) ~ "of tests"), 
@@ -340,8 +347,8 @@ shaded_explainer <- tibble(parameter = "test", values = sample(500)) %>%
 
 # combine panels into final plot
 summary_plot <- plot_grid(
-	plot_grid(accuracy_plot_a, accuracy_plot_b, accuracy_plot_c, cols = 3,
-						labels = c("accuracy", "certainty", "completeness"), 
+	plot_grid(accuracy_plot_a, accuracy_plot_b, ncol = 2,
+						labels = c("accuracy", "certainty"), 
 						label_size = 12, label_fontface = "plain"),
 	plot_grid(boxplot_explainer, shaded_explainer, align = "hv"),
 	nrow = 2,

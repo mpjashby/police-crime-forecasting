@@ -55,6 +55,7 @@ coef_var <- function (dist) {
 }
 
 
+
 # identify dummy variables used to train models
 training_vars <- function (x) {
 	
@@ -64,3 +65,36 @@ training_vars <- function (x) {
 	
 }
 
+
+
+# check if all values in a vector are the same
+is_constant <- function (x) {
+	
+	stopifnot(is.atomic(x))
+
+	if (is.character(x) | is.factor(x)) {
+		ifelse(length(unique(as.character(x))) == 1, TRUE, FALSE)
+	} else {
+		fable:::is.constant(x)
+	}
+	
+}
+
+
+
+# calculate probability forecast will be over the threshold value
+prob_extreme <- Vectorize(function (dist, threshold) {
+	
+	# fcdist objects can either be a two-item list with mean and SD, or a numeric
+	# vector of bootstrapped samples
+	if (length(dist[[1]][[1]]) > 1 & is.numeric(dist[[1]][[1]])) {
+		sum(dist[[1]][[1]] > threshold) / length(dist[[1]][[1]])
+	} else if (has_name(dist, "mean") & has_name(dist, "sd")) {
+		pnorm(threshold, dist$mean, dist$sd, lower.tail = FALSE)	
+	} else {
+		stop("Could not extract mean and standard distribution from distribution ",
+				 "object")
+	}
+
+	
+})

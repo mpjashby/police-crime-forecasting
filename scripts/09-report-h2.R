@@ -8,7 +8,7 @@
 
 if (!exists("models_by_date")) {
 	
-	models_by_month <- read_rds("data_output/models_h2.Rds")
+	models_by_date <- read_rds("data_output/models_h2.Rds")
 	
 }
 

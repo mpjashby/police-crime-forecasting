@@ -88,6 +88,8 @@ crimes_by_shift <- crimes %>%
 		# add notable dates that aren't holidays
 		new_years_eve = ifelse(month(date) == 12 & mday(date) == 31, TRUE, FALSE),
 		halloween = ifelse(month(date) == 10 & mday(date) == 31, TRUE, FALSE),
+		# add weekday dummy
+		weekday = wday(date, label = TRUE),
 		# add first dates dummies
 		month_first = mday(date_round) == 1,
 		year_first = yday(date_round) == 1,
@@ -126,7 +128,7 @@ models_by_shift <- tibble(
 		),
 		test_data = map(
 			forecast_date,
-			~ filter(crimes_by_shift, between(date, ., . + hours(23)))
+			~ filter(crimes_by_shift, between(date, ., . + hours(47)))
 			# ~ filter(crimes_by_shift, between(date, . + hours(24), . + hours(47)))
 		)
 	)
@@ -160,16 +162,7 @@ system.time(
 					group_by(city_name) %>% 
 					select_if(~ !is_constant(.)) %>% 
 					ungroup()
-					# select_if(function (x) {
-					# 	ifelse(
-					# 		is.logical(x),
-					# 		!isTRUE(all.equal(x, rep(FALSE, length(x)))),
-					# 		TRUE
-					# 	)
-					# }) %>% 
-					# remove_missing(na.rm = TRUE) %>% 
-					# as_tsibble(key = city_name, index = date)
-				
+
 				xreg_vars <- training_data %>%
 					as_tibble() %>%
 					select(-city_name, -date, -crimes) %>%
@@ -181,15 +174,29 @@ system.time(
 
 				model(
 					training_data,
-					# naive = NAIVE(crimes ~ lag()),
+					naive = NAIVE(crimes ~ lag()),
 					snaive = SNAIVE(crimes ~ lag()),
-					tslm = TSLM(as.formula(paste(c("crimes ~ trend() + season()", xreg_vars), collapse = " + "))),
-					stl = decomposition_model(STL, crimes ~ trend() + season(), ETS(season_adjust), ETS(season_year), dcmp_args = list(robust = TRUE)),
+					tslm = TSLM(
+						as.formula(paste(c("crimes ~ trend() + season()", xreg_vars), 
+														 collapse = " + "))),
+					stl = decomposition_model(STL, crimes ~ trend() + season(), 
+																		ETS(season_adjust), ETS(season_year), 
+																		dcmp_args = list(robust = TRUE)),
 					ets = ETS(crimes ~ trend() + season() + error()),
-					arima = ARIMA(as.formula(paste(c("crimes ~ trend() + season()", xreg_vars), collapse = " + "))),
-					# neural = NNETAR(as.formula(paste(c("crimes ~ trend() + season() + AR()", xreg_vars), collapse = " + ")), MaxNWts = 2000, scale_inputs = FALSE),
-					fasster = FASSTER(as.formula(paste(c("crimes ~ poly(1) + trig(7) + ARMA()", xreg_vars), collapse = " + "))),
-					prophet = prophet(as.formula(paste(c("crimes ~ growth() + season('year') + season('week')", xreg_vars), collapse = " + ")))
+					arima = ARIMA(
+						as.formula(paste(c("crimes ~ trend() + season()", xreg_vars), 
+														 collapse = " + "))),
+					neural = NNETAR(
+						as.formula(paste(c("crimes ~ trend() + season() + AR()", xreg_vars), 
+														 collapse = " + ")), MaxNWts = 2000, 
+						scale_inputs = FALSE),
+					fasster = FASSTER(
+						as.formula(paste(c("crimes ~ poly(1) + trig(7) + ARMA()", 
+															 xreg_vars), collapse = " + "))),
+					prophet = prophet(
+						as.formula(paste(c("crimes ~ growth() + season('year')",
+															 "season('week') + season('period')", 
+															 xreg_vars), collapse = " + ")))
 				) %>%
 					mutate(combo = (arima + tslm) / 2)
 				
@@ -203,41 +210,12 @@ system.time(
 
 system.time(
 	models_by_shift$forecasts <- map2(
-		# models_by_shift$models[1], as_datetime(models_by_shift$forecast_date[1]),
 		models_by_shift$models, models_by_shift$test_data,
 		function (x, y) {
 			
-			# new_data <- expand.grid(
-			# 	city_name = map_chr(x, ~ .$city_name),
-			# 	date = seq.POSIXt(y, y + hours(16), by = "8 hours")
-			# ) %>% 
-			# 	arrange(city_name, date) %>% 
-			# 	mutate(date_round = as_date(date)) %>% 
-			# 	left_join(holiday_dates, by = c("date_round" = "date")) %>% 
-			# 	left_join(black_fridays, by = c("date_round" = "date")) %>% 
-			# 	left_join(event_dates, by = c("date_round" = "date", "city_name")) %>% 
-			# 	left_join(weather_dates, 
-			# 						by = c("date_round" = "date", "city_name" = "city")) %>% 
-			# 	mutate(
-			# 		holiday = ifelse(is.na(holiday), FALSE, holiday),
-			# 		black_friday = ifelse(is.na(black_friday), FALSE, black_friday),
-			# 		new_years_eve = ifelse(month(date) == 12 & mday(date) == 31, TRUE, FALSE),
-			# 		halloween = ifelse(month(date) == 10 & mday(date) == 31, TRUE, FALSE),
-			# 		month_first = mday(date_round) == 1,
-			# 		year_first = yday(date_round) == 1
-			# 	) %>% 
-			# 	select(-date_round) %>% 
-			# 	as_tsibble(index = date, key = city_name)
-			
 			map(x, function (z) {
 				
-				# if (!z$city_name %in% c("Los Angeles", "San Francisco")) {
-				
 				message(z$city_name)
-				
-				# this_new_data <- new_data %>%
-				# 	filter(city_name == z$city_name) %>%
-				# 	select_at(vars(c("city_name", "date", training_vars(z))))
 				
 				this_new_data <- y %>% 
 					filter(city_name == z$city_name) %>%
@@ -267,7 +245,8 @@ models_by_shift$thresholds <- map(
 															 hour(date) < 16 ~ "daytime", 
 															 TRUE ~ "evening")) %>% 
 			group_by(city_name, shift) %>% 
-			summarise(threshold = quantile(crimes, 1 - (12/365.25))) %>% 
+			# summarise(threshold = quantile(crimes, 1 - (12/365.25))) %>%
+			summarise(threshold = quantile(crimes, 0.95)) %>% 
 			ungroup()
 		
 	})

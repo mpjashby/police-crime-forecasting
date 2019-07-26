@@ -10,8 +10,13 @@ if (!"baseballr" %in% installed.packages())
 	remotes::install_github("BillPetti/baseballr")
 if (!"nflscrapR" %in% installed.packages())
 	remotes::install_github("maksimhorowitz/nflscrapR")
-if (!"fable.prophet" %in% installed.packages())
-	remotes::install_github("mitchelloharawild/fable.prophet")
+
+# always get latest versions of fable and related packages, because they are in 
+# active development
+remotes::install_github("tidyverts/fablelite")
+remotes::install_github("tidyverts/fable")
+remotes::install_github("tidyverts/fasster")
+remotes::install_github("mitchelloharawild/fable.prophet")
 
 # load packages
 library("baseballr") # MLB data
@@ -61,6 +66,8 @@ training_vars <- function (x) {
 	
 	dimnames(x$tslm[[1]]$fit$coef)[[1]] %>% 
 		str_remove("TRUE$") %>% 
+		str_replace("^weekday.+?$", "weekday") %>% 
+		unique() %>% 
 		str_subset("\\(", negate = TRUE)
 	
 }

@@ -89,7 +89,7 @@ crimes_by_shift <- crimes %>%
 		new_years_eve = ifelse(month(date) == 12 & mday(date) == 31, TRUE, FALSE),
 		halloween = ifelse(month(date) == 10 & mday(date) == 31, TRUE, FALSE),
 		# add weekday dummy
-		weekday = as.character(wday(date, label = TRUE)),
+		weekday = wday(date, label = TRUE),
 		# add first dates dummies
 		month_first = mday(date_round) == 1,
 		year_first = yday(date_round) == 1,
@@ -170,7 +170,10 @@ system.time(
 				message("\nRetaining variables ", paste(xreg_vars, collapse = ", "),
 								" and key ", key(training_data), " for ", 
 								first(training_data$city_name), appendLF = TRUE)
-
+				
+				# weekday is added to each model manually, rather than as part of 
+				# xreg_vars, because it is only needed in those models that cannot 
+				# handle multiple seasonality automatically
 				model(
 					training_data,
 					naive = NAIVE(crimes ~ lag()),
@@ -179,25 +182,28 @@ system.time(
 						as.formula(paste(c("crimes ~ trend() + season()", xreg_vars), 
 														 collapse = " + "))),
 					stl = decomposition_model(STL, crimes ~ trend() + season(), 
-																		ETS(season_adjust), ETS(season_year), 
+																		ETS(season_adjust), ETS(season_week), 
+																		ETS(season_year), 
 																		dcmp_args = list(robust = TRUE)),
 					ets = ETS(crimes ~ trend() + season() + error()),
 					arima = ARIMA(
 						as.formula(paste(c("crimes ~ trend() + season()", xreg_vars), 
 														 collapse = " + "))),
-					neural = NNETAR(
-						as.formula(paste(c("crimes ~ trend() + season() + AR()", xreg_vars), 
-														 collapse = " + ")), MaxNWts = 2000, 
-						scale_inputs = FALSE),
+					# neural = NNETAR(
+					# 	as.formula(paste(c("crimes ~ trend() + season() + AR() + weekday", 
+					# 										 xreg_vars), collapse = " + ")), MaxNWts = 2000, 
+					# 	scale_inputs = FALSE),
+					# in fasster, trig(21) corresponds to 3 periods for each of 7 weekdays
 					fasster = FASSTER(
-						as.formula(paste(c("crimes ~ poly(1) + trig(7) + ARMA()", 
-															 xreg_vars), collapse = " + "))),
+						as.formula(paste(c("crimes ~ poly(1) + trig(21) + trig(3) + ARMA()", 
+															 str_subset(xreg_vars, "weekday", negate = TRUE)), 
+														 collapse = " + "))),
 					prophet = prophet(
 						as.formula(paste(c("crimes ~ growth() + season('year')",
-															 "season('week') + season('period')", 
-															 xreg_vars), collapse = " + ")))
-				) %>%
-					mutate(combo = (arima + tslm) / 2)
+															 "season('week') + season('day')", 
+															 str_subset(xreg_vars, "weekday", negate = TRUE)), 
+														 collapse = " + ")))
+				)
 				
 			})
 		})
@@ -224,10 +230,15 @@ system.time(
 					filter(city_name == z$city_name) %>%
 					select_at(vars(c("city_name", "date", training_vars(z))))
 				
+				# message(paste(names(this_new_data), collapse = ", "))
+				# View(head(this_new_data))
+				
 				# forecast based on new data
 				# This is very slow for NNETAR() models because prediction intervals are
-				# calculated by simulation. Set times = 0 to suppress simulations.	
-				forecast(z, new_data = this_new_data, bias_adjust = FALSE) %>%
+				# calculated by simulation. Set times = 0 to suppress simulations.
+				z %>% 
+					# select(city_name, naive, snaive, stl, ets, fasster, prophet) %>% 
+					forecast(new_data = this_new_data, bias_adjust = FALSE) %>%
 					mutate(coef_variation = map_dbl(.distribution, coef_var))
 
 			})

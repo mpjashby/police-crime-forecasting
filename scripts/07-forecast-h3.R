@@ -51,20 +51,22 @@ black_fridays <- holiday_dates %>%
 # record how many crimes occur at exactly midnight
 crimes %>% 
 	filter(city_name != "Fort Worth") %>% 
-	filter(hour(date_single) == 0 & minute(date_single) == 0) %>% 
-	nrow() %>% 
-  format(big.mark = ",")
-	
+	mutate(midnight = hour(date_single) == 0 & minute(date_single) == 0) %>% 
+	# filter(hour(date_single) == 0 & minute(date_single) == 0) %>% 
+	group_by(city_name, midnight) %>% 
+	summarise(n = n()) %>% 
+	spread(midnight, n)
+
 # count crimes per shift in each city
-crimes_by_shift <- crimes %>% 
+crimes_by_shift <- crimes %>%
 	# Fort Worth data only have dates, not times
-	filter(city_name != "Fort Worth") %>% 
+	filter(!city_name %in% c("Detroit", "Fort Worth")) %>% 
 	# filter out crimes that occur exactly at midnight
-	filter(!hour(date_single) == 0 & !minute(date_single) == 0) %>% 
+	filter(!hour(date_single) == 0 & !minute(date_single) == 0) %>%
 	# round timestamps to eight-hour periods starting at midnight (midnight starts
 	# are common in US police departments)
 	mutate(date = floor_date(date_single, "8 hours")) %>% 
-	count(city_name, date, name = "crimes") %>% 
+	count(city_name, date, name = "crimes") %>%
 	# filter out any crimes occurring outside the dates of interest
 	filter(date %within% date_range) %>%
 	# convert to tsibble, which is needed to run fill_gaps()
@@ -150,8 +152,9 @@ models_by_shift <- tibble(
 # RUN MODELS
 
 system.time(
-	models_by_shift$models <- map(
-		models_by_shift$training_data, function (x) {
+	# models_by_shift$models <- map(
+	test_models <- map(
+		models_by_shift$training_data[c(27, 28)], function (x) {
 			map(as.character(unique(x$city_name)), function (y) {
 				
 				training_data <- x %>% 
@@ -260,7 +263,7 @@ models_by_shift$thresholds <- map(
 															 TRUE ~ "evening")) %>% 
 			group_by(city_name, shift) %>% 
 			# summarise(threshold = quantile(crimes, 1 - (12/365.25))) %>%
-			summarise(threshold = quantile(crimes, 0.95)) %>% 
+			summarise(threshold = quantile(crimes, 0.95, na.rm = TRUE)) %>% 
 			ungroup()
 		
 	})

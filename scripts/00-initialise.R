@@ -99,9 +99,9 @@ prob_extreme <- Vectorize(function (dist, threshold) {
 	} else if (has_name(dist, "mean") & has_name(dist, "sd")) {
 		pnorm(threshold, dist$mean, dist$sd, lower.tail = FALSE)	
 	} else {
-		stop("Could not extract mean and standard distribution from distribution ",
-				 "object")
+		# warning("Could not extract mean and standard distribution from ",
+		# 		 "distribution object")
+		NA
 	}
 
-	
 })

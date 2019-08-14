@@ -20,13 +20,22 @@ crimes <- get_crime_data(
 
 
 # ADD DISTRICT
-# districts <- st_read("data_output/police_boundaries.gpkg")
-# crimes <- st_join(crimes, districts)
+districts <- st_read("data_output/police_boundaries.gpkg") %>% 
+	st_transform(102003)
+
+crimes <- crimes %>% 
+	st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = FALSE) %>% 
+	# transform to Albers equal area projection because st_join() assumes planar
+	# co-ordinates
+	st_transform(102003) %>% 
+	st_join(districts) %>% 
+	# remove geometry
+	st_drop_geometry() %>% 
+	# remove duplicate city column
+	select(-city)
 
 
 
 # SAVE DATA
 crimes <- crimes %>% 
-	# select(-city) %>% 
-	st_drop_geometry() %>% 
 	write_csv("data_output/crime_data.csv.gz")

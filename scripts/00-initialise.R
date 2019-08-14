@@ -16,6 +16,7 @@ if (!"nflscrapR" %in% installed.packages())
 remotes::install_github("tidyverts/fablelite")
 remotes::install_github("tidyverts/fable")
 remotes::install_github("tidyverts/fasster")
+remotes::install_github("tidyverts/feasts")
 remotes::install_github("mitchelloharawild/fable.prophet")
 
 # load packages
@@ -23,8 +24,8 @@ library("baseballr") # MLB data
 library("cowplot")   # marginal plots
 library("crimedata") # crime data
 library("fable")     # forecasting
-library("feasts")    # also forecasting
-library("fasster")   # yet more forecasting
+library("fasster")   # more forecasting
+library("feasts")    # yet more forecasting
 # library("ggrepel")   # repelled text labels
 # library("ggridges")  # ridge plots
 library("ggthemes")  # Tufte box plots
@@ -34,8 +35,14 @@ library("nbastatR")  # NBA data
 library("nflscrapR") # NFL data
 library("rnoaa")     # weather data
 library("sf")        # spatial processing 
+library("slackr")    # notifications
 library("tsibble")   # tidy time series
 library("tidyverse") # utility functions, **load this after all other packages**
+
+
+
+# setup slackr
+slackr_setup()
 
 
 

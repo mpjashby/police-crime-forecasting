@@ -36,29 +36,58 @@ crimes %>%
 # count crimes per year in each district
 crimes_by_month <- crimes %>% 
 	filter(!is.na(district)) %>% 
-	# create a combined variable for city and district
+	# create a combined variable for city and district, and extract crime 
+	# categories of interest
 	mutate(
-		city_district = paste(city_name, str_to_title(district)),
-		date = as_date(date_single)
+		date = as_date(date_single),
+		offense = case_when(
+			offense_type  == "aggravated assault" ~ "aggravated assault",
+			# offense_group == "arson" ~ "arson",
+			offense_group == "burglary/breaking & entering" ~ "burglary",
+			offense_group == "homicide offenses" ~ "homicide",
+			# offense_group == "larceny/theft offenses" ~ "theft",
+			# offense_type  == "rape (except statutory rape)" ~ "rape",
+			offense_group == "robbery" ~ "robbery",
+			# offense_group == "motor vehicle theft" ~ "vehicle theft",
+			TRUE ~ "other"
+		)
 	) %>% 
-	# remove crimes at Austin airport, which are rare
-	# remove crimes occurring in exclaves of Chicago, represented by Chicago 
-	# Police 31st District, which doesn't appear to otherwise exist
-	# remove Louisville 7th District, which has almost no crimes
-	filter(!city_district %in% c("Austin APT", "Chicago 31", "Louisville 7")) %>% 
-	count(city_name, city_district, date, name = "crimes") %>%
+	# filter out cities with no data for one or more of the crimes of interest
+	filter(
+		city_name %in% c("Detroit", "Los Angeles", "New York", "Tucson"),
+		offense != "other"
+	) %>% 
+	count(city_name, district, offense, date, name = "crimes") %>% 
+	{
+		# This code is needed to fill gaps in the daily data for dates with no
+		# offences in a particular district for a particular type. 
+		# tsibble::fill_gaps() can't be used for this because it doesn't add missing
+		# dates at the start or end of the series
+		temp <- .
+		expand.grid(
+			group = unique(paste(temp$city_name, temp$district, temp$offense, 
+													 sep = " | ")),
+			date = seq.Date(min(temp$date), max(temp$date), by = "day")
+		) %>% 
+			as_tibble() %>% 
+			separate(group, into = c("city_name", "district", "offense"), 
+							 sep = " \\| ") %>% 
+			left_join(temp, by = c("city_name", "district", "offense", "date"))
+	} %>% 
+	# the empty cases will have crimes == NA, so replace this with crimes == 0
 	mutate(
+		crimes = ifelse(is.na(crimes), 0, crimes),
 		month = yearmonth(date),
-		weekday = ifelse(!wday(date, TRUE) %in% c("Sat", "Sun"), TRUE, FALSE)
-	) %>% 
-	left_join(holiday_dates, by = "date") %>% 
-	group_by(city_name, city_district, month) %>% 
-	summarise(crimes = sum(crimes), count_weekdays = sum(weekday), 
-						count_holidays = sum(holiday, na.rm = TRUE)) %>% 
-	ungroup() %>% 
-	as_tsibble(index = month, key = city_district) %>% 
-	fill_gaps(crimes = 0)
-
+		weekday = !wday(date, TRUE) %in% c("Sat", "Sun")
+	) %>%
+	left_join(holiday_dates, by = "date") %>%
+	group_by(city_name, district, offense, month) %>%
+	summarise(crimes = as.integer(sum(crimes)), count_weekdays = sum(weekday),
+						count_holidays = sum(holiday, na.rm = TRUE)) %>%
+	ungroup() %>%
+	as_tsibble(index = month, key = c(city_name, district, offense)) %>% 
+	filter(!(city_name == "Detroit" & offense == "rape"))
+	
 # create tsibble to hold model results and separate data into training/test sets
 models_by_month <- tsibble(
 	forecast_date = yearmonth(seq.Date(ymd("2015-01-01"), ymd("2017-12-31"), 
@@ -80,10 +109,16 @@ models_by_month <- tsibble(
 
 
 
+# SET UP PARALLEL PROCESSING
+
+future::plan("multicore")
+
+
+
 # RUN MODELS
 
 system.time({
-	models_by_month$models <- map(
+	models_by_month$models <- furrr::future_map(
 		models_by_month$training_data[1], model, 
 		naive = NAIVE(crimes ~ lag()),
 		snaive = SNAIVE(crimes ~ lag("year")),
@@ -99,7 +134,8 @@ system.time({
 		fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + count_weekdays + 
 												count_holidays),
 		prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + 
-												count_holidays)
+												count_holidays),
+		.progress = TRUE
 	) %>% 
 		map(mutate, combo = (arima + ets + fasster + stl) / 4)
 
@@ -111,34 +147,20 @@ system.time({
 # CALCULATE FORECASTS
 
 system.time({
-	models_by_month$forecasts <- map2(
-		models_by_month$models[1], models_by_month$forecast_date[1],
+	models_by_month$forecasts <- furrr::future_map2(
+		models_by_month$models[1], models_by_month$test_data[1],
 		function (x, y) {
 			
-			# generate tsibble of new data for 90 days starting on the forecast date
-			new_data <- expand.grid(
-				city_district = as.character(unique(x$city_district)),
-				date = seq.Date(as_date(y), as_date(y) + years(3) - months(1),
-												by = "days")
-			) %>%
-			mutate(
-				month = yearmonth(date),
-				weekday = !wday(date, TRUE) %in% c("Sat", "Sun")
-			) %>%
-			left_join(holiday_dates, by = "date") %>%
-			group_by(city_district, month) %>%
-			summarise(count_weekdays = sum(weekday),
-								count_holidays = sum(holiday, na.rm = TRUE)) %>%
-			ungroup() %>%
-			as_tsibble(index = month, key = city_district)
-
 			# forecast based on new data
 			# This is very slow for NNETAR() models because prediction intervals are
 			# calculated by simulation. Set times = 0 to suppress simulations.
-			forecast(x, new_data = new_data, bias_adjust = FALSE) %>%
+			x %>% 
+				filter(!(city_name == "Detroit" & offense == "rape")) %>% 
+				forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
 				mutate(coef_variation = map_dbl(.distribution, coef_var))
 			
-		}
+		},
+		.progress = TRUE
 	)
 	
 	slackr_bot("Finished estimating forecasts for H3")
@@ -146,24 +168,31 @@ system.time({
 
 
 
-# GENERATE DRAWS
+# CALCULATE ACCURACY MEASURES
 
 system.time({
-	test_generate <- generate(
-		select(models_by_month$models[[1]], city_district, naive, snaive, tslm, ets, 
-					 neural),
-		select(models_by_month$test_data[[1]], -crimes)
+	models_by_month$accuracy <- furrr::future_pmap(
+		list(models_by_month$forecasts[1], models_by_month$training_data[1],
+				 models_by_month$test_data[1]), 
+		~ left_join(
+			accuracy(..1, rbind(..2, ..3)),
+			as_tibble(..1) %>% 
+				group_by(city_name, district, offense, .model) %>% 
+				summarise(coef_var = mean(coef_variation)) %>% 
+				ungroup(),
+			by = c("city_name", "district", "offense", ".model")
+		),
+		.progress = TRUE
 	)
 	
-	slackr_bot("Finished generating draws for H3")
+	slackr_bot("Finished calculating accuracy statistics for H3")
 })
 
 
 
 # SAVE MODELS
-models_by_shift %>% 
-	select(-models) %>% 
-	mutate(forecasts = map_depth(forecasts, 2, 
-															 ~select(as_tibble(.), -.distribution))) %>% 
+models_by_month %>% 
+	select(-models) %>%
+	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
 	write_rds("data_output/models_h3.Rds", compress = "gz")
 

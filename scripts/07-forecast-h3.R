@@ -113,60 +113,93 @@ models_by_month <- tsibble(
 
 future::plan("multicore")
 
+# remove crimes object because it is too big to copy to each parallel instance
+rm(crimes, crimes_by_month)
+
 
 
 # RUN MODELS
 
-system.time({
-	models_by_month$models <- furrr::future_map(
-		models_by_month$training_data[1], model, 
-		naive = NAIVE(crimes ~ lag()),
-		snaive = SNAIVE(crimes ~ lag("year")),
-		tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
-		stl = decomposition_model(STL, crimes ~ trend() + season(), 
-															ETS(season_adjust), 
-															dcmp_args = list(robust = TRUE)),
-		ets = ETS(crimes ~ trend() + season() + error()),
-		arima = ARIMA(crimes ~ trend() + season() + count_weekdays + 
-										count_holidays),
-		neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + 
-											count_holidays),
-		fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + count_weekdays + 
+tryCatch(
+	{
+		
+		furrr::future_map2(
+			models_by_month$training_data, 
+			format.Date(models_by_month$forecast_date, "%Y-%m-%d"), 
+			function (x, y) {
+				
+				model(
+					x,
+					naive = NAIVE(crimes ~ lag()),
+					snaive = SNAIVE(crimes ~ lag("year")),
+					tslm = TSLM(crimes ~ trend() + season() + count_weekdays + 
 												count_holidays),
-		prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + 
-												count_holidays),
-		.progress = TRUE
-	) %>% 
-		map(mutate, combo = (arima + ets + fasster + stl) / 4)
-
-	slackr_bot("Finished estimating models for H3")
-})
+					stl = decomposition_model(STL, crimes ~ trend() + season(), 
+																		ETS(season_adjust), 
+																		dcmp_args = list(robust = TRUE)),
+					ets = ETS(crimes ~ trend() + season() + error()),
+					arima = ARIMA(crimes ~ trend() + season() + count_weekdays + 
+													count_holidays),
+					neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + 
+														count_holidays),
+					fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + 
+															count_weekdays + count_holidays),
+					prophet = prophet(crimes ~ growth() + season("year") + 
+															count_weekdays + count_holidays)
+				) %>% 
+					write_rds(glue::glue("data_output/model_h3_{y}.rds"), compress = "gz")
+				
+				send_notification(glue::glue("Finished estimating models for forecast ",
+																		 "date {y}"))
+				
+			}
+		)
+		
+		send_notification("Finished estimating models for H3")
+		
+	},
+	error = function (e) send_notification(e, "error"),
+	warning = function (w) send_notification(w, "warning"),
+	message = function (m) send_notification(m)
+)
 
 
 
 # CALCULATE FORECASTS
 
-system.time({
-	models_by_month$forecasts <- furrr::future_map2(
-		models_by_month$models[1], models_by_month$test_data[1],
-		function (x, y) {
-			
-			# forecast based on new data
-			# This is very slow for NNETAR() models because prediction intervals are
-			# calculated by simulation. Set times = 0 to suppress simulations.
-			x %>% 
-				filter(!(city_name == "Detroit" & offense == "rape")) %>% 
-				forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
-				mutate(coef_variation = map_dbl(.distribution, coef_var))
-			
-		},
-		.progress = TRUE
-	)
-	
-	slackr_bot("Finished estimating forecasts for H3")
-})
+tryCatch(
+	{
+		
+		furrr::future_map2(
+			format.Date(models_by_month$forecast_date, "%Y-%m-%d"), 
+			models_by_month$test_data, 
+			function (x, y) {
+				
+				# forecast based on new data
+				# This is very slow for NNETAR() models because prediction intervals are
+				# calculated by simulation. Set times = 0 to suppress simulations.
+				glue::glue("data_output/model_h3_{x}.rds") %>% 
+					read_rds() %>% 
+					filter(!(city_name == "Detroit" & offense == "rape")) %>% 
+					forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
+					mutate(coef_variation = map_dbl(.distribution, coef_var)) %>% 
+					write_rds(glue::glue("data_output/forecast_h3_{x}.rds"), 
+										compress = "gz")
+				
+				send_notification(glue::glue("Finished generating forecasts for {x}"))
+				
+			}
+		)
+		
+		send_notification("Finished generating forecasts for H3")
+		
+	},
+	error = function (e) send_notification(e, "error"),
+	warning = function (w) send_notification(w, "warning"),
+	message = function (m) send_notification(m)
+)
 
-
+				
 
 # CALCULATE ACCURACY MEASURES
 

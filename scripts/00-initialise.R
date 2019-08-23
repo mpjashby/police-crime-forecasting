@@ -13,7 +13,7 @@ if (!"nflscrapR" %in% installed.packages())
 
 # always get latest versions of fable and related packages, because they are in 
 # active development
-remotes::install_github("tidyverts/fablelite")
+remotes::install_github("tidyverts/fabletools")
 remotes::install_github("tidyverts/fable")
 remotes::install_github("tidyverts/fasster")
 remotes::install_github("tidyverts/feasts")
@@ -43,6 +43,22 @@ library("tidyverse") # utility functions, **load this after all other packages**
 
 # setup slackr
 slackr_setup()
+
+
+
+# handle errors, warnings etc
+send_notification <- function (content = "Finished!", level = "message") {
+	
+	stopifnot(level %in% c("stop", "error", "warning", "message"))
+	if (level == "error") level <- "stop"
+
+	if (Sys.getenv("SLACK_INCOMING_URL_PREFIX") == "") slackr_setup()
+	try(slackr_bot(content), silent = TRUE)
+	beepr::beep(sound = 8)
+	do.call(level, list(content))
+	invisible(NULL)
+	
+}
 
 
 

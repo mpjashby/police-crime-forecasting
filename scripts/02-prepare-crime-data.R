@@ -6,7 +6,14 @@
 
 
 
+if (!isNamespaceLoaded("tidyverse")) {
+	source(here::here("scripts/00-initialise.R"))
+}
+
+
+
 # DOWNLOAD CRIME DATA
+
 crimes <- get_crime_data(
 	years = 2010:2018, # 5 years training + 1 year forecast horizon + 3 years test
 	cities = c("Austin", "Chicago", "Detroit", "Kansas City", "Los Angeles", 
@@ -20,6 +27,7 @@ crimes <- get_crime_data(
 
 
 # ADD DISTRICT
+
 districts <- st_read("data_output/police_boundaries.gpkg") %>% 
 	st_transform(102003)
 
@@ -37,5 +45,6 @@ crimes <- crimes %>%
 
 
 # SAVE DATA
+
 crimes <- crimes %>% 
 	write_csv("data_output/crime_data.csv.gz")

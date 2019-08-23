@@ -113,13 +113,17 @@ models_by_month <- tsibble(
 
 future::plan("multicore")
 
+# remove crimes object because it is too large to be copied to each parallel 
+# instance
+rm(crimes)
+
 
 
 # RUN MODELS
 
 system.time({
 	models_by_month$models <- furrr::future_map(
-		models_by_month$training_data[1], model, 
+		models_by_month$training_data, model, 
 		naive = NAIVE(crimes ~ lag()),
 		snaive = SNAIVE(crimes ~ lag("year")),
 		tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
@@ -148,14 +152,13 @@ system.time({
 
 system.time({
 	models_by_month$forecasts <- furrr::future_map2(
-		models_by_month$models[1], models_by_month$test_data[1],
+		models_by_month$models, models_by_month$test_data,
 		function (x, y) {
 			
 			# forecast based on new data
 			# This is very slow for NNETAR() models because prediction intervals are
 			# calculated by simulation. Set times = 0 to suppress simulations.
 			x %>% 
-				filter(!(city_name == "Detroit" & offense == "rape")) %>% 
 				forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
 				mutate(coef_variation = map_dbl(.distribution, coef_var))
 			
@@ -172,8 +175,8 @@ system.time({
 
 system.time({
 	models_by_month$accuracy <- furrr::future_pmap(
-		list(models_by_month$forecasts[1], models_by_month$training_data[1],
-				 models_by_month$test_data[1]), 
+		list(models_by_month$forecasts, models_by_month$training_data,
+				 models_by_month$test_data), 
 		~ left_join(
 			accuracy(..1, rbind(..2, ..3)),
 			as_tibble(..1) %>% 

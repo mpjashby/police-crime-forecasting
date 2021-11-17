@@ -1,24 +1,39 @@
-# this script downloads weather data and stores it
+# This script downloads weather data and stores it
 
-# get a list of codes for cities with weather stations
-# sorting by desc(id) retrieves the US stations first, because the country code
-# is the first part of the station ID, followed by the state FIPS code
-noaa_cities <- ncdc_locs(datasetid = "GHCND", locationcategoryid = "CITY",
-												 startdate = "2010-01-01", enddate = "2018-12-31",
-												 sortfield = "id", sortorder = "desc", limit = 1000) %>% 
-	pluck("data")
+# Note a NOAA NCDC API key is needed to download weather data -- it is stored in
+# the .Renviron file as NOAA_KEY
 
-# from this list, manually choose the cities of interest
+# Get a list of codes for cities with weather stations
+# Note: by ordering the results in descending order of the station ID, we get
+# the US stations near the top of the results and so can restrict the number of
+# records retrieved to 1,000
+noaa_cities <- ncdc_locs(
+	datasetid = "GHCND", 
+	locationcategoryid = "CITY",
+	startdate = "2010-01-01", enddate = "2019-12-31",
+	sortfield = "id", 
+	sortorder = "desc", 
+	limit = 1000
+) %>% 
+	pluck("data") %>% 
+	filter(str_detect(id, "CITY:US")) %>% 
+	arrange(name) %>% 
+	as_tibble()
+
+# from this list, manually (using `str_detect()` in `filter()`) choose the 
+# weather stations of interest
 weather_cities <- c(
 	"CITY:US480005", # Austin
 	"CITY:US170006", # Chicago
 	"CITY:US260006", # Detroit
-	"CITY:US480023", # Fort Worth
 	"CITY:US290008", # Kansas City
 	"CITY:US060013", # Los Angeles
 	"CITY:US210009", # Louisville
+	"CITY:US470013", # Memphis
 	"CITY:US360019", # New York
 	"CITY:US060031", # San Francisco
+	"CITY:US530018", # Seattle
+	"CITY:US290021", # St Louis
 	"CITY:US040014"  # Tucson
 )
 
@@ -30,24 +45,26 @@ noaa_stations <- weather_cities %>%
 	pluck("data") %>% 
 	map(filter, ymd(mindate) <= ymd("2010-01-01"), datacoverage == 1)
 
-# manually choose a station for each city
+# manually choose a station for each city (stations beginning USW preferred)
 weather_stations <- tribble(
 	~station, ~station_name, ~city,
 	"GHCND:USW00013958", "AUSTIN CAMP MABRY, TX US", "Austin",
-	"GHCND:USC00111577", "CHICAGO MIDWAY AIRPORT 3 SW, IL US", "Chicago",
+	"GHCND:USW00014819", "CHICAGO MIDWAY AIRPORT 3 SW, IL US", "Chicago",
 	"GHCND:USW00094847", "DETROIT METRO AIRPORT, MI US", "Detroit",
-	"GHCND:USC00413285", "FORT WORTH WSFO, TX US", "Fort Worth",
 	"GHCND:USW00013988", "KANSAS CITY DOWNTOWN AIRPORT, MO US", "Kansas City",
 	"GHCND:USW00023174", "LOS ANGELES INTERNATIONAL AIRPORT, CA US", "Los Angeles",
-	"GHCND:USC00154958", "LOUISVILLE WEATHER FORECAST OFFICE, KY US", "Louisville",
+	"GHCND:USW00013810", "LOUISVILLE BOWMAN FIELD, KY US", "Louisville",
+	"GHCND:USW00013893", "MEMPHIS INTERNATIONAL AIRPORT, TN US", "Memphis",
 	"GHCND:USW00094728", "NY CITY CENTRAL PARK, NY US", "New York",
 	"GHCND:USW00023234", "SAN FRANCISCO INTERNATIONAL AIRPORT, CA US", "San Francisco",
+	"GHCND:USW00024234", "SEATTLE BOEING FIELD, WA US", "Seattle",
+	"GHCND:USW00013994", "ST. CHARLES 2.3 NE, MO US", "St Louis",
 	"GHCND:USW00023160", "TUCSON INTERNATIONAL AIRPORT, AZ US", "Tucson"
 )
 
 # define function to return GHCND data as a tibble
-# ncdc() can only retrieve 1,000 rows of data, which with 10 cities and four
-# data types equates to 25 days of data
+# ncdc() can only retrieve 1,000 rows of data, which with 12 cities and four
+# data types equates to 20 days of data
 get_weather <- function (date, stations) {
 	
 	pluck(ncdc(
@@ -55,7 +72,7 @@ get_weather <- function (date, stations) {
 		datatypeid = c("PRCP", "SNOW", "TMAX", "TMIN"), 
 		stationid = stations,
 		startdate = format(date, "%F"), 
-		enddate = format(date + days(24), "%F"),
+		enddate = format(date + days(19), "%F"),
 		limit = 1000
 	), "data")
 
@@ -64,79 +81,46 @@ get_weather <- function (date, stations) {
 # get data
 # details of the row data format are at 
 # <ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/readme.txt>
-weather_data <- seq.Date(ymd("2010-01-01"), ymd("2018-12-31"), 
-												 by = "25 days") %>% 
+weather_data <- seq.Date(ymd("2010-01-01"), ymd("2019-12-31"), by = "20 days") %>% 
 	map_dfr(
 		function (x) {
 			
-			message(paste("Getting data for 25 days starting", format(x, "%d %b %Y")), 
+			message(paste("Getting data for 20 days starting", format(x, "%d %b %Y")), 
 							appendLF = TRUE)
 			
 			get_weather(x, weather_stations$station)
 			
 		})
 
-# SFO data are missing for a period so these records can be replaced by values
-# from a different site, which can't be used overall because of other missing
-# data but which does have values for all the dates when SFO data are missing
-sf_weather_data <- get_weather(ymd("2018-06-22"), "GHCND:USW00023272")
-
-# add the replacement SF data to the main dataset
-weather_data_processed <- rbind(
-	filter(
-		weather_data, 
-		!(station == "GHCND:USW00023234" & 
-				between(as_date(parse_datetime(date)), ymd("2018-06-22"), 
-								ymd("2018-07-11")))
-	),
-	filter(sf_weather_data, between(as_date(parse_datetime(date)), 
-																	ymd("2018-06-22"), ymd("2018-07-11")))
-) %>% 
-	arrange(date)
-
-# process data
-weather_data_processed <- weather_data_processed %>% 
+# Process data
+weather_data_processed <- weather_data %>% 
 	left_join(weather_stations, by = "station") %>% 
-	mutate(city = ifelse(station == "GHCND:USW00023272", "San Francisco", 
-											 city)) %>% 
-	select(-fl_m, -fl_q, -fl_so, -fl_t, -station, -station_name) %>%
-	spread(datatype, value) %>%
-	janitor::clean_names() %>%
-	# snow is very rare and seems to be very often missing from the data, so if
+	mutate(date = as_date(date)) %>%
+	select(date, city, datatype, value) %>% 
+	filter(between(date, ymd("2010-01-01"), ymd("2019-12-31"))) %>%
+	pivot_wider(names_from = datatype, values_from = value) %>% 
+	janitor::clean_names() %>% 
+	# Snow is very rare and seems to be very often missing from the data, so if
 	# there is no snow value set it to zero (LA data don't have values for snow 
 	# at all because it hasn't snowed there since 1961)
-	mutate(
-		date = as_date(date),
-		snow = ifelse(is.na(snow), 0, snow)
-	) %>%
-	filter(between(date, ymd("2010-01-01"), ymd("2018-12-31"))) %>%
-	# precipitation and temperature values are in tenths of units (mm and ºC)
-	mutate_at(vars("prcp", "tmax", "tmin"), ~ . / 10) %>% 
-	as_tsibble(key = city, index = date)
+	replace_na(list(snow = 0)) %>% 
+	# Precipitation and temperature values are in tenths of units (mm and ºC)
+	mutate(across(c(prcp, tmax, tmin), ~ . / 10)) %>% 
+	as_tsibble(index = date, key = city)
 
-# report missing data
+# Store missing weather data for later reporting
 weather_data_processed %>% 
-	as_tibble() %>% 
-	filter_all(any_vars(is.na(.))) %>% 
-	arrange(city, date) %>% 
-	write_csv(here::here("fig_output/missing_weather_data.csv"))
+	scan_gaps() %>% 
+	write_csv(here::here("data_output/weather_data_missing.csv"))
 
-# impute missing data
+# Fill any gaps in the time series (both missing rows and missing individual
+# values) with the 7-day centre-weighted moving average
 weather_data_imputed <- weather_data_processed %>% 
-	# some dates are missing from the data altogether, so we add these
 	fill_gaps() %>% 
-	# if only some data are missing for a day, the row will exist but the missing
-	# values will be NA, which we replace with the rolling mean of a seven-day
-	# period centred on the missing date
-	mutate_if(
-		is.numeric, 
-		~ ifelse(
-			is.na(.), 
-			mean(c(lag(., 3), lag(., 2), lag(.), lead(.), lead(., 2), lead(., 3)), 
-					 na.rm = TRUE), 
-			.
-		)
-	)
-
+	mutate(across(
+		where(is.numeric), 
+		~ slider::slide_dbl(., .f = mean, .before = 3, .after = 3)
+	))
+	
 # save data
 write_csv(weather_data_imputed, here::here("data_output/weather_data.csv.gz"))

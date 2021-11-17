@@ -6,11 +6,20 @@
 
 
 
+if (!isNamespaceLoaded("tidyverse")) {
+	source(here::here("scripts/00-initialise.R"))
+}
+
+
+
 # DOWNLOAD CRIME DATA
 crimes <- get_crime_data(
-	years = 2010:2018, # 5 years training + 1 year forecast horizon + 3 years test
-	cities = c("Austin", "Chicago", "Detroit", "Kansas City", "Los Angeles", 
-						 "Louisville", "New York", "San Francisco", "Tucson"),
+	# 5 years training + 1 year forecast horizon + 4 years test
+	years = 2010:2019, 
+	cities = c(
+		"Austin", "Chicago", "Detroit", "Kansas City", "Los Angeles", "Louisville", 
+		"Memphis", "New York", "San Francisco", "Seattle", "St Louis", "Tucson"
+	),
 	type = "core",
 	output = "sf"
 ) %>% 
@@ -20,14 +29,10 @@ crimes <- get_crime_data(
 
 
 # ADD DISTRICT
-districts <- st_read("data_output/police_boundaries.gpkg") %>% 
-	st_transform(102003)
-
-crimes <- crimes %>% 
-	st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = FALSE) %>% 
-	# transform to Albers equal area projection because st_join() assumes planar
-	# co-ordinates
-	st_transform(102003) %>% 
+# Use a projected CRS to avoid spherical geometry problems
+districts <- read_sf("data_output/police_boundaries.gpkg") %>% st_transform(2163)
+crimes_with_districts <- crimes %>% 
+	st_transform(2163) %>% 
 	st_join(districts) %>% 
 	# remove geometry
 	st_drop_geometry() %>% 
@@ -37,5 +42,4 @@ crimes <- crimes %>%
 
 
 # SAVE DATA
-crimes <- crimes %>% 
-	write_csv("data_output/crime_data.csv.gz")
+write_csv(crimes_with_districts, "data_output/crime_data_with_districts.csv.gz")

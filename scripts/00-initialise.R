@@ -2,22 +2,26 @@
 # every time a new RStudio session begins. All packages should be loaded from
 # this file and all custom function defined here.
 
-
 # if needed, install non-CRAN packages
 if (!"nbastatR" %in% installed.packages())
 	remotes::install_github("abresler/nbastatR")
 if (!"baseballr" %in% installed.packages())
 	remotes::install_github("BillPetti/baseballr")
-if (!"nflscrapR" %in% installed.packages())
-	remotes::install_github("maksimhorowitz/nflscrapR")
+if (!"rMLS" %in% installed.packages())
+	remotes::install_github("ryang73/rMLS")
 
 # always get latest versions of fable and related packages, because they are in 
 # active development
-remotes::install_github("tidyverts/fabletools")
-remotes::install_github("tidyverts/fable")
-remotes::install_github("tidyverts/fasster")
-remotes::install_github("tidyverts/feasts")
-remotes::install_github("mitchelloharawild/fable.prophet")
+if (!"fabletools" %in% installed.packages())
+	remotes::install_github("tidyverts/fabletools")
+if (!"fable" %in% installed.packages())
+	remotes::install_github("tidyverts/fable")
+if (!"fasster" %in% installed.packages())
+	remotes::install_github("tidyverts/fasster")
+if (!"feasts" %in% installed.packages())
+	remotes::install_github("tidyverts/feasts")
+if (!"fable.prophet" %in% installed.packages())
+	remotes::install_github("mitchelloharawild/fable.prophet")
 
 # load packages
 library("baseballr") # MLB data
@@ -32,8 +36,11 @@ library("ggthemes")  # Tufte box plots
 library("lubridate") # handle dates
 library("fable.prophet") # Facebook forecasting
 library("nbastatR")  # NBA data
-library("nflscrapR") # NFL data
+library(nflfastR)    # NFL data
+library(nhlapi)      # NHL data
+library(rMLS)        # MLS data
 library("rnoaa")     # weather data
+library(rvest)       # HTML scraping
 library("sf")        # spatial processing 
 library("slackr")    # notifications
 library("tsibble")   # tidy time series
@@ -41,8 +48,14 @@ library("tidyverse") # utility functions, **load this after all other packages**
 
 
 
+# load common helpers
+# this must be done after the packages are loaded, since it requires ggplot2
+source(here::here("../helpers.R"))
+
+
+
 # setup slackr
-slackr_setup()
+# slackr_setup()
 
 
 
@@ -128,3 +141,11 @@ prob_extreme <- Vectorize(function (dist, threshold) {
 	}
 
 })
+
+
+# function to turn a vector into a printed list
+vector_to_text <- function (x, sep = ", ", final_sep = "and") {
+	
+	paste(paste(x[1:length(x) - 1], collapse = sep), final_sep, x[[length(x)]])
+	
+}

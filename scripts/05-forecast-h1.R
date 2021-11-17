@@ -23,7 +23,7 @@ if (!exists("crimes")) {
 
 # get holiday dates
 holiday_dates <- tibble(
-	date = as_date(timeDate::holidayNYSE(2010:2018)),
+	date = as_date(timeDate::holidayNYSE(2010:2019)),
 	holiday = TRUE
 )
 
@@ -33,43 +33,61 @@ crimes_by_month <- crimes %>%
 	count(city_name, date, name = "crimes") %>%
 	mutate(
 		month = yearmonth(date),
-		weekday = ifelse(!wday(date, TRUE) %in% c("Sat", "Sun"), TRUE, FALSE)
+		weekday = !wday(date, label = TRUE) %in% c("Sat", "Sun")
 	) %>% 
 	left_join(holiday_dates, by = "date") %>% 
 	group_by(city_name, month) %>% 
-	summarise(crimes = sum(crimes), count_weekdays = sum(weekday), 
-						count_holidays = sum(holiday, na.rm = TRUE)) %>% 
-	ungroup() %>% 
+	summarise(
+		crimes = sum(crimes), 
+		count_weekdays = sum(weekday), 
+		count_holidays = sum(holiday, na.rm = TRUE),
+		.groups = "drop"
+	) %>% 
 	as_tsibble(index = month, key = city_name)
 
-# create tsibble to hold model results and separate data into training/test sets
+# save monthly crime counts for use in journal article figures
+write_rds(crimes_by_month, here::here("data_output/monthly_crime_counts.rds"))
+
+# The data should be split into 3-year training datasets and 3-year test 
+# datasets based on a sliding window from the start to the end of the data:
+# 
+# |-- training --|---- test ----|
+#  |-- training --|---- test ----|
+#   |-- training --|---- test ----|
+#    etc …
+# 
+# To do this, start with a tsibble of dates that form the mid-point between the
+# training and test data, which is all the months that are at least three years
+# from the start of the data and at least three years from the end. This takes
+# the form of a tsibble of dates, which can be populated with training and test
+# data for the appropriate periods from the main crimes dataset.
 models_by_month <- tsibble(
-	forecast_date = yearmonth(seq.Date(ymd("2013-01-01"), ymd("2015-12-31"), 
-																		 by = "months")), 
+	forecast_date = yearmonth(seq(ymd("2013-01-01"), ymd("2017-01-01"), by = "months")), 
 	index = forecast_date
 ) %>% 
 	mutate(
+		# Data for the 
 		training_data = map(
 			as_date(forecast_date), 
-			~ filter(crimes_by_month, 
-							 between(as_date(month), . - months(36), .))
+			~ filter(crimes_by_month, between(as_date(month), . - months(36), . - months(1)))
 		),
 		test_data = map(
 			as_date(forecast_date),
-			~ filter(crimes_by_month,
-							 between(as_date(month), . + months(1), . + years(3)))
+			~ filter(crimes_by_month, between(as_date(month), ., . + months(35)))
 		)
 	)
 
 # check that the window functions above have worked
 # models_by_month %>%
 # 	mutate(
-# 		training_period = map_chr(training_data, function (x) {
-# 			paste(first(x$month), "to", last(x$month))
-# 		}),
-# 		test_period = map_chr(test_data, function (x) {
-# 			paste(first(x$month), "to", last(x$month))
-# 		})
+# 		training_period = map_chr(
+# 			training_data, 
+# 			~ str_glue("{first(.$month)} to {last(.$month)} ({length(unique(.$month))} months)")
+# 		),
+# 		test_period = map_chr(
+# 			test_data, 
+# 			~ str_glue("{first(.$month)} to {last(.$month)} ({length(unique(.$month))} months)")
+# 		)
 # 	) %>%
 # 	select(-training_data, -test_data) %>%
 # 	View()
@@ -78,38 +96,34 @@ models_by_month <- tsibble(
 
 # RUN MODELS
 
-# future::plan("multiprocess")
+# Remove the raw crime data because otherwise it causes problems when the 
+# `future` package sets up multiple sessions on account of `crimes` being very
+# large
+rm(crimes)
+
+# Set up parallel processing
+future::plan("multisession")
 
 system.time(
-	models_by_month$models <- furrr::future_map(
-		models_by_month$training_data, model,
-		naive = NAIVE(crimes ~ lag()),
-		snaive = SNAIVE(crimes ~ lag("year")),
-		# common1 = RW(crimes ~ lag(12)),
-		# common2 = RW(crimes ~ lag(24)),
-		# common3 = RW(crimes ~ lag(36)),
-		tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
-		stl = decomposition_model(STL, crimes ~ trend() + season(),
-															ETS(season_adjust), 
-															dcmp_args = list(robust = TRUE)),
-		ets = ETS(crimes ~ trend() + season() + error()),
-		arima = ARIMA(crimes ~ trend() + season() + count_weekdays + 
-										count_holidays),
-		# var models excluded because they are much worse than the others, which is
-		# interesting but makes seeing the relative differences in accuracy between
-		# the other models difficult to see on a plot
-		# var = VAR(crimes ~ trend() + season() + AR()),
-		neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + 
-											count_holidays),
-		fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + count_weekdays + 
-												count_holidays),
-		prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + 
-												count_holidays),
-		.progress = TRUE
-	) %>%
+	models_by_month$models <- models_by_month %>% 
+		pluck("training_data") %>% 
+		furrr::future_map(
+			model,
+			naive = NAIVE(crimes ~ lag()),
+			snaive = SNAIVE(crimes ~ lag("year")),
+			common = RW(crimes ~ lag(12) + lag(24) + lag(36)),
+			tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
+			stl = decomposition_model(STL(crimes ~ trend() + season()), ETS(season_adjust)),
+			ets = ETS(crimes ~ trend() + season() + error()),
+			arima = ARIMA(crimes ~ trend() + season() + count_weekdays + count_holidays),
+			var = VAR(crimes ~ trend() + season() + AR()),
+			neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + count_holidays),
+			fasster = FASSTER(crimes ~ trend() + season() + ARMA() + count_weekdays + count_holidays),
+			prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + count_holidays),
+			.options = furrr::furrr_options(seed = TRUE),
+			.progress = TRUE
+		) %>%
 		map(mutate, combo = (arima + ets + fasster + stl) / 4)
-				# common = (common1 + common2 + common3) / 3)
-		# map(mutate, common1 = NULL, common2 = NULL, common3 = NULL)
 )
 
 
@@ -121,30 +135,37 @@ system.time(
 		models_by_month$models, models_by_month$forecast_date,
 		function (x, y) {
 			
-			# generate tsibble of new data for 90 days starting on the forecast date
-			new_data <- expand.grid(
+			message(str_glue("Generating forecasts starting in {format(y, '%b %Y')}"))
+			
+			# generate tsibble of new data for 3 years starting on the forecast date
+			new_data <- expand_grid(
 				city_name = as.character(unique(x$city_name)),
-				date = seq.Date(as_date(y), as_date(y) + years(3) - months(1), 
-												by = "days")
+				date = seq(as_date(y), as_date(y) + months(35), by = "days")
 			) %>% 
 				mutate(
 					month = yearmonth(date),
-					weekday = ifelse(!wday(date, TRUE) %in% c("Sat", "Sun"), TRUE, FALSE)
+					weekday = !wday(date, label = TRUE) %in% c("Sat", "Sun")
 				) %>% 
 				left_join(holiday_dates, by = "date") %>% 
 				group_by(city_name, month) %>% 
-				summarise(count_weekdays = sum(weekday), 
-									count_holidays = sum(holiday, na.rm = TRUE)) %>% 
-				ungroup() %>% 
+				summarise(
+					count_weekdays = sum(weekday), 
+					count_holidays = sum(holiday, na.rm = TRUE),
+					.groups = "drop"
+				) %>% 
 				as_tsibble(index = month, key = city_name)
 			
 			# forecast based on new data
 			# This is very slow for NNETAR() models because prediction intervals are
 			# calculated by simulation. Set times = 0 to suppress simulations.
-			forecast(x, new_data = new_data, bias_adjust = FALSE) %>% 
-				mutate(coef_variation = map_dbl(.distribution, coef_var))
+			x %>% 
+				forecast(new_data = new_data) %>%
+				mutate(
+					coef_variation = sqrt(distributional::variance(crimes)) / abs(mean(crimes))
+				)
 			
 		},
+		.options = furrr::furrr_options(seed = TRUE),
 		.progress = TRUE
 	)
 )
@@ -154,15 +175,16 @@ system.time(
 # CALCULATE ACCURACY MEASURES
 
 models_by_month$accuracy <- pmap(
-	list(models_by_month$forecasts, models_by_month$training_data, 
-			 models_by_month$test_data), 
-	# ~ accuracy(..1, rbind(..2, ..3))
+	list(
+		models_by_month$forecasts,
+		models_by_month$training_data,
+		models_by_month$test_data
+	), 
 	~ left_join(
-		accuracy(..1, rbind(..2, ..3)),
+		accuracy(..1, bind_rows(..2, ..3)),
 		as_tibble(..1) %>% 
 			group_by(city_name, .model) %>% 
-			summarise(coef_var = mean(coef_variation)) %>% 
-			ungroup(),
+			summarise(coef_var = mean(coef_variation), .groups = "drop"),
 		by = c("city_name", ".model")
 	)
 )
@@ -173,7 +195,7 @@ models_by_month$accuracy <- pmap(
 
 models_by_month$portmanteau <- map(models_by_month$models, function (x) {
 	x %>% 
-		augment(type = "response") %>% 
+		augment() %>% 
 		# lag = 10 chosen following https://robjhyndman.com/hyndsight/ljung-box-test/
 		features(.resid, portmanteau_tests, lag = 10)
 })
@@ -182,7 +204,7 @@ models_by_month$portmanteau <- map(models_by_month$models, function (x) {
 
 # SAVE MODELS
 models_by_month %>% 
-	select(-models) %>% 
-	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>% 
+	# select(-models) %>% 
+	# mutate(forecasts = map(forecasts, ~ select(as_tibble(.), -crimes))) %>% 
 	write_rds("data_output/models_h1.Rds", compress = "gz")
 

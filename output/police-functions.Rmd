@@ -1,0 +1,372 @@
+---
+title: ""
+author: Matt Ashby
+date: '2021-10-27'
+draft: true
+categories:
+  - Crime and justice chart of the week
+tags:
+  - police
+---
+
+```{r set knitr options, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, include=FALSE)
+```
+
+```{r set chart parameters}
+chart_details <- list(
+	id = "police-functions",
+	title = "",
+	subtitle = ".",
+	source_url = "https://www.gov.uk/government/collections/police-workforce-england-and-wales",
+	source_title = "Home Office, 2021"
+)
+```
+
+```{r load packages and helper}
+# custom packages not loaded by helpers.R
+library(readODS)
+library(readxl)
+
+# load this after loading custom packages
+source(here::here("helpers.R"))
+```
+
+```{r get and tidy data}
+if (!file.exists(paste0(chart_details$id, "-data.csv.gz"))) {
+  
+# List URLs
+files <- list(
+  `2012` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/115785/hosb0912-supptabs.xls",
+  `2013` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/223836/police-workforce-supptabs-mar13.ods",
+  `2014` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/330345/police-workforce-supptabs-mar14.ods",
+  `2015` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/444537/police-workforce-supptabs-mar15.ods",
+  `2016` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/544954/police-workforce-tabs-jul16.ods",
+  `2017` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/629865/police-workforce-tabs-jul17.ods",
+  `2018` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/728153/police-workforce-tabs-jul18.ods",
+  `2019` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/831666/police-workforce-mar19-tables.ods",
+  `2020` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/954919/police-workforce-mar20-tables.ods",
+  `2021` = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/1005990/police-workforce-mar21-tables.ods"
+)
+
+# Download files
+walk2(
+  files, 
+  names(files), 
+  ~ download.file(
+    url = .x, 
+    destfile = str_glue("{tempdir()}/police_functions_{.y}.{ifelse(str_detect(.x, 'xls$'), 'xls', 'ods')}")
+  )
+)
+
+# Load early data
+tidy_data_early <- str_glue("{tempdir()}/police_functions_{2012:2015}.{ifelse(2012:2015 <= 2012, 'xls', 'ods')}") %>% 
+  set_names(nm = 2012:2015) %>% 
+  map_dfr(function (x) {
+    # File is Excel
+    if (str_detect(x, "xls$")) {
+      read_excel(x, sheet = "Officers Functions", skip = 2) %>% 
+        clean_names() %>% 
+        select(-x1) %>% 
+        rename(function_name = x2)
+    # File is ODS in old format
+    } else if ("S_Table_1" %in% list_ods_sheets(x)) {
+      read_ods(x, sheet = "S_Table_1", skip = 3) %>% 
+        clean_names() %>% 
+        as_tibble() %>% 
+        select(-x) %>%
+        rename(function_name = x_2)
+    # File is ODS in new format
+    } else {
+      read_ods(x, sheet = "1__Officers_Functions", skip = 3) %>% 
+        clean_names() %>% 
+        as_tibble() %>% 
+        select(-x, -x_2) %>%
+        rename(function_name = x_3)
+    }
+  }, .id = "year") %>% 
+  pivot_longer(
+    -c(year, function_name), 
+    names_to = "force", 
+    values_to = "officers"
+  ) %>% 
+  mutate(
+    force = recode(
+      str_remove(force, "\\d+$"),
+      "avon_somerset" = "avon_and_somerset",
+      "devon_cornwall" = "devon_and_cornwall"
+    ),
+    function_name = str_to_lower(str_remove(function_name, "\\d+$")),
+    year = as.numeric(year)
+  ) %>% 
+  filter(force != "england_and_wales") %>% 
+  mutate(type = case_when(
+    function_name == "neighbourhoods" ~ "neighbourhood policing", 
+    function_name == "response" ~ "response policing", 
+    function_name == "control room (call handlers)" ~ "control room", 
+    function_name %in% c("traffic", "traffic wardens") ~ "roads policing", 
+    function_name == "intelligence" ~ "intelligence gathering/analysis", 
+    function_name == "child/sex/domestic/missing persons" ~ "public protection", 
+    function_name %in% c("cid", "cid specialist crime units") ~ "crime investigation", 
+    TRUE ~ NA_character_
+  ))
+
+# Load late data
+file_data_late <- str_glue("{tempdir()}/police_functions_{2016:2021}.ods") %>% 
+  set_names(nm = 2016:2021) %>% 
+  map(read_ods, sheet = "Table_F1", skip = 3)
+
+# Process late data
+tidy_data_late <- file_data_late %>% 
+  map_dfr(function (x) {
+    
+    raw <- clean_names(x)
+    
+    # In some years the force names are above the ONS codes and sometimes below,
+    # so we have to reverse the order so that they are consistent
+    if ("pfa_code5" %in% names(raw)) {
+      raw <- raw %>% 
+        set_names(nm = make_clean_names(as.character(raw[1, ]))) %>% 
+        rename(x = na) %>% 
+        slice(2:81)
+    }
+    
+    # In some years the data has footnotes that need to be removed
+    if ("police_force" %in% names(raw)) {
+      raw <- slice(raw, 2:81)
+    }
+    
+    if ("x_2" %in% names(raw)) {
+      raw <- rename(raw, police_force = x_2)
+    }
+    
+    # Return processed data
+    raw %>% 
+      as_tibble() %>% 
+      mutate(across(!c(x, police_force), as.numeric))
+  
+  }, .id = "year") %>%
+  rename(function_group = x, function_name = police_force) %>% 
+  select(-c(
+    eastern, east_midlands, london, north_east, north_west, south_east, 
+    south_west, west_midlands_2, yorkshire_and_the_humber, england, wales, 
+    england_and_wales, total
+  )) %>% 
+  mutate(
+    function_group = recode(
+      parse_number(function_group), 
+      `1` = "local policing", 
+      `2` = "dealing with the public", 
+      `3` = "criminal justice arrangements", 
+      `4` = "road policing", 
+      `5` = "operational support", 
+      `6` = "intelligence", 
+      `7` = "investigations", 
+      `8` = "investigative support", 
+      `9` = "national policing", 
+      `10` = "support functions", 
+      `13` = "public protection",
+      .default = NA_character_
+    ),
+    function_name = str_to_lower(str_remove(function_name, "\\d+$")),
+    function_group = case_when(
+      function_name == "Other" ~ "other",
+      function_name == "Total" ~ "total",
+      TRUE ~ function_group
+    ),
+    year = as.numeric(year)
+  ) %>% 
+  filter(
+    (function_group != function_name |
+      function_group %in% c("national policing", "other", "total")) &
+      !is.na(function_name)
+  ) %>%
+  pivot_longer(
+    -c(year, function_group, function_name), 
+    names_to = "force", 
+    values_to = "officers"
+  ) %>% 
+  mutate(
+    force = recode(
+      str_remove(force, "[\\d\\_]+$"),
+      "avon_somerset" = "avon_and_somerset",
+      "devon_cornwall" = "devon_and_cornwall"
+    )
+  ) %>%
+  filter(!is.na(officers)) %>% 
+  mutate(type = case_when(
+    function_name %in% c("neighbourhood policing", "specialist community liaison") ~ "neighbourhood policing", 
+    function_name == "incident (response) management" ~ "response policing", 
+    function_name == "central communications unit" ~ "control room", 
+    function_group == "road policing" ~ "roads policing", 
+    function_group == "intelligence" ~ "intelligence gathering/analysis", 
+    function_name == "public protection (included cse and domestic abuse)" | function_group == "public protection" ~ "public protection", 
+    function_group == "investigations" ~ "crime investigation", 
+    TRUE ~ NA_character_
+  ))
+
+  tidy_data <- bind_rows(tidy_data_early, tidy_data_late)
+
+	# save tidy data
+	write_csv(tidy_data, paste0(chart_details$id, "-data.csv.gz"))	
+	
+} else {
+	
+	# load tidy data
+	tidy_data <- read_csv(paste0(chart_details$id, "-data.csv.gz"))
+	
+}	
+
+```
+
+```{r prepare data for chart}
+chart_data <- tidy_data %>% 
+  filter(!is.na(type)) %>% 
+  count(type, year, wt = officers, name = "officers")
+```
+
+```{r build plot}
+ggplot(chart_data, aes(year, officers)) +
+  geom_area() +
+  facet_wrap(vars(type), scales = "free_y") +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+
+
+chart <- ggplot(chart_data) +
+  geom_hline(aes(yintercept = 1), size = 0.25) +
+  ggtext::geom_richtext(
+    aes(x = min(year_ending), y = max(severity_index), label = label),
+    na.rm = TRUE,
+    colour = "grey10",
+    fill = "white",
+    hjust = 0,
+    label.padding = unit(0.15, "lines"),
+    label.size = NA,
+    lineheight = 1,
+    size = elements$label_text_size * 0.9,
+    vjust = 1
+  ) +
+  geom_ribbon(
+    aes(x = year_ending, ymin = severity_index, ymax = national_severity_index, fill = category),
+    alpha = 0.5
+  ) +
+  geom_line(
+    aes(x = year_ending, y = national_severity_index),
+    linetype = "21"
+  ) +
+  geom_line(
+    aes(x = year_ending, y = severity_index, colour = category)
+  ) +
+  scale_x_date(date_breaks = "3 years", date_labels = "%Y") +
+  scale_y_continuous(
+    labels = scales::number_format(accuracy = 1, prefix = "x"),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  scale_colour_manual(
+    values = c(
+      "higher" = ucl_colours_list[["Light Red"]], 
+      "lower" = ucl_colours_list[["Bright Green"]], 
+      "similar" = ucl_colours_list[["Light Blue"]]
+    ),
+    labels = c(
+      "higher" = "more than 10% higher   ", 
+      "lower" = "more than 10% lower   ", 
+      "similar" = "similar (+/-10%)   "
+    ),
+    guide = guide_legend(title.hjust = 0, title.position = "top"),
+    aesthetics = c("colour", "fill")
+  ) +
+  facet_wrap(vars(name)) +
+  labs(
+		title = chart_details$title,
+		subtitle = format_subtitle(chart_details$subtitle, .width = 120),
+    caption = "data for City of London Police and Greater Manchester Police are not available",
+    x = NULL,
+    y = "crime pressure relative to the 2010 national average",
+    colour = "compared to the national average (the dotted line), crime pressure in this force in 2020 was …",
+    fill = "compared to the national average (the dotted line), crime pressure in this force in 2020 was …"
+  ) +
+  theme_cjcharts() +
+  theme(
+		axis.text = element_text(size = 7),
+		legend.key.width = unit(12, "points"), 
+		legend.justification = "left",
+		panel.spacing = unit(0.2, "lines"),
+		strip.text = element_text(size = 8),
+		strip.background = element_blank()
+  )
+```
+
+
+`r chart_details$subtitle`
+
+```{r display plot, echo=FALSE, include=TRUE, fig.asp=1}
+add_logo(chart + labs(title = NULL, subtitle = NULL), 
+				 chart_details$source_title, chart_details$id)
+```
+
+[larger image](../`r chart_details$id`.png)
+| [annotated R code to produce this chart](https://github.com/mpjashby/lesscrime.info/blob/master/content/post/`r chart_details$id`.Rmd)
+
+Data source: [`r chart_details$source_title`](`r chart_details$source_url`)
+
+```{r, echo=FALSE, include=TRUE}
+chart_data %>% 
+  group_by(year_ending) %>% 
+  summarise(across(c("total_severity", "officers"), sum), .groups = "drop") %>% 
+  mutate(
+    name = "England & Wales", 
+    severity_per_officer = total_severity / officers
+  ) %>% 
+  select(year_ending, name, severity_per_officer) %>% 
+  bind_rows(select(chart_data, name, year_ending, severity_per_officer)) %>% 
+  mutate(year_ending = year(year_ending)) %>% 
+  pivot_wider(names_from = year_ending, values_from = severity_per_officer) %>% 
+  left_join(
+    select(filter(chart_data, year_ending == last(year_ending)), name),
+    by = "name"
+  ) %>% 
+  group_by(name) %>% 
+  mutate(
+    label = perc_change(first(`2010`), last(`2020`)),
+    across(where(is.numeric), ~ scales::number(. / 1000, accuracy = 0.1)),
+    order = as.numeric(`2020`)
+  ) %>% 
+  ungroup() %>% 
+  arrange(desc(order)) %>% 
+  select(-order) %>% 
+  rename(`change, 2010–20` = label) %>% 
+  gt::gt() %>% 
+  gt::tab_header(
+    title = "Crime severity per officer"
+  ) %>% 
+  gt::cols_align(align = "right") %>% 
+  gt::cols_align(align = "left", columns = name) %>% 
+  gt::tab_style(
+    style = list(gt::cell_text(weight = "bold")), 
+    locations = gt::cells_body(rows = name == "England & Wales")
+  )
+```
+
+### Notes
+
+The Office for National Statistics (ONS) publishes [estimates of the severity of different types of police-recorded crime](https://www.ons.gov.uk/peoplepopulationandcommunity/crimeandjustice/datasets/crimeseverityscoreexperimentalstatistics), derived from the average sentence imposed in court for each type of offence. In the same dataset, ONS publishes an overall estimate of the severity of crime per capita in each police force area. To convert this to an estimate of crime severity per officer (referred to above as _crime pressure_), severity per capita was multiplied by police force area population[^fn1] and then divided by the [number of full-time equivalent police officers in each force](https://www.gov.uk/government/collections/police-workforce-england-and-wales). Crime pressure is therefore defined as the severity of police-recorded crime per full-time equivalent officer.
+
+Estimates of the severity of different crimes are inherently limited, although they are likely to be more informative for some purposes than simply counting crimes (which implicitly assumes all crimes are of equal importance). For a further discussion of this, see [_Comparing methods for measuring crime harm/severity_](/publication/measuring_crime_harm/).
+
+[^fn1]: Police force area populations were calculated by aggregating [mid-year population estimates for local authorities](https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland) to police force areas using the ONS open geography portal [local authority to police force lookup table](https://geoportal.statistics.gov.uk/datasets/local-authority-district-to-community-safety-partnerships-to-police-force-areas-december-2018-lookup-in-england-and-wales).
+
+
+```{r export chart}
+# save PNG for social media
+ggsave(
+	filename = paste0(chart_details$id, ".png"), 
+	plot = add_logo(chart, chart_details$source_title, chart_details$id), 
+	device = "png", 
+	width = 600 / 72, 
+	height = 600 / 72, 
+	units = "in", 
+	bg = "white"
+)
+```

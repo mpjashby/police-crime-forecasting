@@ -1,0 +1,464 @@
+---
+title: "Modelling and forecasting time series in R"
+author: "**Dr Matt Ashby** | UCL Jill Dando Institute | `r format(Sys.Date(), '%B %Y')`"
+output:
+  xaringan::moon_reader:
+    css: ["ucl-basic.css", "animate.css"]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+---
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(echo = FALSE)
+
+library(ggtext)
+library(gt)
+library(lubridate)
+library(tidyverse)
+
+source(here::here("../helpers.R"))
+```
+
+
+
+class: animated, fadeIn
+
+```{r chart-generic-time-series-1, fig.asp=0.56, fig.retina=4, out.width="100%"}
+generic_time_series <- 0:23 %>% 
+	enframe(name = "row", value = "date") %>% 
+	mutate(
+		trend = (row / 2) + 29,
+		season = sin(seq(0, 4 * pi, length.out = n())) * 3,
+		remainder = rnorm(n(), sd = 2.5)
+	)
+
+ggplot(generic_time_series) +
+	geom_point(aes(date, trend + season + remainder), colour = "grey33", shape = 21, size = 2) +
+	# geom_point(aes(date, trend), colour = ucl_colours_list["Bright Red"]) +
+	# geom_line(aes(date, trend), colour = ucl_colours_list["Bright Red"], linetype = "43") +
+	# geom_segment(aes(x = date, xend = date, y = trend, yend = trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	# geom_point(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	# geom_line(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"], linetype = "43") +
+	# geom_segment(aes(x = date, xend = date, y = trend + season, yend = trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	# geom_point(aes(date, trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(limits = c(0, NA), n.breaks = 10) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: animated, fadeIn
+
+```{r chart-generic-time-series-2, fig.asp=0.56, fig.retina=4, out.width="100%"}
+ggplot(generic_time_series) +
+	geom_point(aes(date, trend + season + remainder), colour = "grey33", shape = 21, size = 2) +
+	# geom_point(aes(date, trend), colour = ucl_colours_list["Bright Red"]) +
+	geom_line(aes(date, trend), colour = ucl_colours_list["Bright Red"]) +
+	# geom_segment(aes(x = date, xend = date, y = trend, yend = trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	# geom_point(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	# geom_line(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"], linetype = "43") +
+	# geom_segment(aes(x = date, xend = date, y = trend + season, yend = trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	# geom_point(aes(date, trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	annotate(
+		geom = "text",
+		x = max(generic_time_series$date), 
+		y = 2, 
+		label = "trend",
+		hjust = 1,
+		size = chart_elements$label_text_size * 2
+	) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(limits = c(0, NA), n.breaks = 10) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: animated, fadeIn
+
+```{r chart-generic-time-series-3, fig.asp=0.56, fig.retina=4, out.width="100%"}
+ggplot(generic_time_series) +
+	geom_point(aes(date, trend + season + remainder), colour = "grey33", shape = 21, size = 2) +
+	# geom_point(aes(date, trend), colour = ucl_colours_list["Bright Red"]) +
+	geom_line(aes(date, trend), colour = ucl_colours_list["Bright Red"]) +
+	geom_segment(aes(x = date, xend = date, y = trend, yend = trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	# geom_point(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	geom_line(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"], linetype = "63") +
+	# geom_segment(aes(x = date, xend = date, y = trend + season, yend = trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	# geom_point(aes(date, trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	annotate(
+		geom = "text",
+		x = max(generic_time_series$date), 
+		y = 2, 
+		label = "trend + seasonality",
+		hjust = 1,
+		size = chart_elements$label_text_size * 2
+	) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(limits = c(0, NA), n.breaks = 10) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: animated, fadeIn
+
+```{r chart-generic-time-series-4, fig.asp=0.56, fig.retina=4, out.width="100%"}
+ggplot(generic_time_series) +
+	geom_point(aes(date, trend + season + remainder), colour = "grey33", shape = 21, size = 2) +
+	# geom_point(aes(date, trend), colour = ucl_colours_list["Bright Red"]) +
+	# geom_line(aes(date, trend), colour = ucl_colours_list["Bright Red"], linetype = "43") +
+	# geom_segment(aes(x = date, xend = date, y = trend, yend = trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	# geom_point(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"]) +
+	geom_line(aes(date, trend + season), colour = ucl_colours_list["Bright Blue"], linetype = "63") +
+	geom_segment(aes(x = date, xend = date, y = trend + season, yend = trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	geom_point(aes(date, trend + season + remainder), colour = ucl_colours_list["Orange"]) +
+	annotate(
+		geom = "text",
+		x = max(generic_time_series$date), 
+		y = 2, 
+		label = "trend + seasonality + everything else",
+		hjust = 1,
+		size = chart_elements$label_text_size * 2
+	) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(limits = c(0, NA), n.breaks = 10) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: big-text, animated, fadeIn
+
+```{r chart-different-trends-1, fig.asp=0.56, fig.retina=4, out.width="100%"}
+different_trends <- generic_time_series %>% 
+	select(date, linear = trend) %>% 
+	mutate(
+		quadratic = linear + 2 + (date^2 / 20),
+		something_else = linear - 2 - c(
+			rep(0, times = 4), 
+			abs(sin(seq(pi * 0.5, pi * 1.5, length.out = 16)) - 1) * 7.5, 
+			rep(15, times = 4)
+		)
+	) %>% 
+	pivot_longer(-date, names_to = "type", values_to = "trend")
+
+different_trends %>% 
+	filter(type == "linear") %>% 
+	ggplot(aes(date, trend, colour = type)) + 
+	geom_line() + 
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(
+		limits = c(0, max(different_trends$trend)), 
+		n.breaks = 10
+	) +
+	scale_colour_manual(
+		values = unname(ucl_colours_list[c("Bright Red", "Bright Blue", "Orange")])
+	) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		legend.position = "none",
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: big-text, animated, fadeIn
+
+```{r chart-different-trends-2, fig.asp=0.56, fig.retina=4, out.width="100%"}
+ggplot(different_trends, aes(date, trend, colour = type)) + 
+	geom_line() + 
+	annotate(
+		geom = "text",
+		x = min(different_trends$date), 
+		y = max(different_trends$trend), 
+		label = "trends can be non-linear",
+		hjust = 0,
+		size = chart_elements$label_text_size * 2,
+		vjust = 1
+	) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(
+		limits = c(0, max(different_trends$trend)), 
+		n.breaks = 10
+	) +
+	scale_colour_manual(
+		values = unname(ucl_colours_list[c("Bright Red", "Bright Blue", "Orange")])
+	) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		legend.position = "none",
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: big-text, animated, fadeIn
+
+```{r chart-multiple-seasons-1, fig.asp=0.56, fig.retina=4, out.width="100%"}
+multiple_seasons <- tibble(date = seq(0, (24 * 12) - 1)) %>% 
+	mutate(
+		trend = (date / 24) + 29,
+		season1 = sin(seq(0, 6 * pi, length.out = n())) * 3,
+		season2 = sin(seq(0, 6 * 8 * pi, length.out = n())) * 2,
+		season3 = case_when(
+			# First few days, since otherwise these match the subsequent conditions
+			date <= 3 ~ 0,
+			# Two days before/after peak day
+			(date + 2) %% 72 == 0 | (date - 2) %% 72 == 0 ~ 1 + rpois(n(), lambda = 2),
+			# Day before/after peak day
+			(date + 1) %% 72 == 0 | (date - 1) %% 72 == 0 ~ 2.5 + rpois(n(), lambda = 2),
+			# Peak day
+			date %% 72 == 0 ~ 5 + rpois(n(), lambda = 2),
+			# Every other day
+			TRUE ~ 0
+		)
+	)
+
+ggplot(multiple_seasons) + 
+	geom_line(aes(date, trend), colour = "grey67") +
+	geom_line(aes(date, trend + season1), colour = ucl_colours_list["Bright Blue"], linetype = "63") +
+	# geom_line(aes(date, trend + season1 + season2), colour = ucl_colours_list["Bright Blue"], linetype = "32") +
+	annotate(
+		geom = "text",
+		x = max(multiple_seasons$date), 
+		y = 2, 
+		label = "single seasonal pattern",
+		hjust = 1,
+		size = chart_elements$label_text_size * 2
+	) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(
+		limits = c(
+			0, 
+			max(multiple_seasons$trend + multiple_seasons$season1 + multiple_seasons$season2 + multiple_seasons$season3)
+		), 
+		n.breaks = 10
+	) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		legend.position = "none",
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: big-text, animated, fadeIn
+
+```{r chart-multiple-seasons-2, fig.asp=0.56, fig.retina=4, out.width="100%"}
+ggplot(multiple_seasons) + 
+	# geom_line(aes(date, 0), colour = "grey67") +
+	# geom_line(aes(date, trend + season1), colour = ucl_colours_list["Bright Blue"], linetype = "63") +
+	geom_line(aes(date, trend + season1 + season2 + season3), colour = ucl_colours_list["Bright Blue"], linetype = "32") +
+	annotate(
+		geom = "text",
+		x = max(multiple_seasons$date), 
+		y = 2, 
+		label = "multiple seasonal patterns",
+		hjust = 1,
+		size = chart_elements$label_text_size * 2
+	) +
+	scale_x_continuous(n.breaks = 12) +
+	scale_y_continuous(
+		limits = c(
+			0, 
+			max(multiple_seasons$trend + multiple_seasons$season1 + multiple_seasons$season2 + multiple_seasons$season3)
+		), 
+		n.breaks = 10
+	) +
+	labs(
+		x = "time →",
+		y = "the thing you're measuring →"
+	) +
+	theme_minimal() +
+	theme(
+		axis.text = element_blank(),
+		axis.ticks = element_line(colour = "grey33"),
+		axis.title = element_markdown(),
+		legend.position = "none",
+		panel.grid = element_blank()
+	)
+```
+
+
+
+---
+
+class: big-text, middle, center, animated, fadeIn
+
+time-series data typically violate<br>the assumptions of regression models
+
+
+
+---
+
+class: big-text, animated, fadeIn
+
+```{r acf-norm, fig.asp=0.56, fig.retina=4, out.width="100%"}
+acf(
+	rnorm(nrow(multiple_seasons)), 
+	main = "autocorrelation plot for random data",
+	xlab = "lag",
+	ylab = "correlation"
+)
+```
+
+
+
+---
+
+class: big-text, animated, fadeIn
+
+```{r acf-ts, fig.asp=0.56, fig.retina=4, out.width="100%"}
+multiple_seasons %>% 
+	mutate(sum = trend + season1 + season2 + season3 + rnorm(n(), sd = 2.5)) %>% 
+	pull(sum) %>% 
+	acf(
+		main = "autocorrelation plot for time-series data",
+		xlab = "lag",
+		ylab = "correlation"
+	)
+```
+
+
+
+---
+
+class: big-text, middle, center, animated, fadeIn
+
+there are *many* ways of<br>modelling time-series data
+
+
+
+---
+
+class: big-text, middle, animated, fadeIn
+
+**ARIMA** models combine one or more:
+
+  1. **auto-regression**: *lagged* values of the DV
+  2. **integration**: *differenced* values of the DV
+  3. **moving-average** values of the DV
+
+
+
+---
+
+class: big-text, middle, animated, fadeIn
+
+`arima()` in the `stats` package
+
+`Arima()` in the `forecast` package
+
+`auto.arima()` in the `forecast` package
+
+**`ARIMA()` in the `fable` package**
+
+`stan_sarima()` in the `bayesforecast` package
+
+
+---
+
+class: middle, center, animated, fadeIn
+
+<span style="font-size: 750%">`r fontawesome::fa("arrow-right", fill = "#0097A9")` &nbsp; `r fontawesome::fa("r-project", fill = "#002855")`</span>
+
+
+
+---
+
+class: big-text, middle, animated, fadeIn
+
+# Thanks!
+
+These slides:<br>**lesscrime.info/slides/time-series-models-nscr**
+
+`r fontawesome::fa(name = "envelope")` **matthew.ashby@ucl.ac.uk**
+
+`r fontawesome::fa(name = "twitter", fill = "#1DA1F2")` **@LessCrime**
+
+<p style="font-size: 90%;">Cover photo by <a href="https://unsplash.com/@qrenep?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Rene Böhmer</a> on <a href="https://unsplash.com/s/photos/data?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText">Unsplash</a></p>

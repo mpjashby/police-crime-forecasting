@@ -14,7 +14,7 @@ if (!isNamespaceLoaded("tidyverse")) {
 
 # DOWNLOAD CRIME DATA
 crimes <- get_crime_data(
-	# 5 years training + 1 year forecast horizon + 4 years test
+	# 3 years training + 3 years test
 	years = 2010:2019, 
 	cities = c(
 		"Austin", "Chicago", "Detroit", "Kansas City", "Los Angeles", "Louisville", 

@@ -120,6 +120,54 @@ rm(crimes, crimes_by_month)
 
 
 
+<<<<<<< HEAD
+# RUN MODELS
+
+tryCatch(
+	{
+		
+		furrr::future_map2(
+			models_by_month$training_data, 
+			format.Date(models_by_month$forecast_date, "%Y-%m-%d"), 
+			function (x, y) {
+				
+				if (file.exists(glue::glue("data_output/model_h3_{y}.rds")))
+					return(invisible(NULL))
+				
+				model(
+					x,
+					naive = NAIVE(crimes ~ lag()),
+					snaive = SNAIVE(crimes ~ lag("year")),
+					tslm = TSLM(crimes ~ trend() + season() + count_weekdays + 
+												count_holidays),
+					stl = decomposition_model(STL, crimes ~ trend() + season(), 
+																		ETS(season_adjust), 
+																		dcmp_args = list(robust = TRUE)),
+					ets = ETS(crimes ~ trend() + season() + error()),
+					arima = ARIMA(crimes ~ trend() + season() + count_weekdays + 
+													count_holidays),
+					neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + 
+														count_holidays),
+					fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + 
+															count_weekdays + count_holidays),
+					prophet = prophet(crimes ~ growth() + season("year") + 
+															count_weekdays + count_holidays)
+				) %>% 
+					write_rds(glue::glue("data_output/model_h3_{y}.rds"), compress = "gz")
+				
+				send_notification(glue::glue("Finished estimating models for forecast ",
+																		 "date {y}"))
+				
+			}
+		)
+		
+		send_notification("Finished estimating models for H3")
+		
+	},
+	error = function (e) send_notification(e, "error"),
+	warning = function (w) send_notification(w, "warning"),
+	message = function (m) send_notification(m)
+=======
 # RUN MODELS -------------------------------------------------------------------
 
 system.time(
@@ -141,10 +189,54 @@ system.time(
 			.progress = TRUE
 		) %>%
 		map(mutate, combo = (arima + ets + fasster + stl) / 4)
+>>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 )
 
 
 
+<<<<<<< HEAD
+# CALCULATE FORECASTS
+
+tryCatch(
+	{
+		
+		walk2(
+			format.Date(models_by_month$forecast_date[1], "%Y-%m-%d"), 
+			models_by_month$test_data[1], 
+			function (x, y) {
+				
+				if (file.exists(glue::glue("data_output/forecast_h3_{x}.rds"))) {
+					send_notification(glue::glue("Skipping forecasting for {x}"))
+					return(invisible(NULL))
+				}
+				
+				if (!file.exists(glue::glue("data_output/model_h3_{x}.rds"))) {
+					send_notification(glue::glue("Cannot find model file for {x}"),
+														"warning")
+					return(invisible(NULL))
+				}
+				
+				# forecast based on new data
+				# This is very slow for NNETAR() models because prediction intervals are
+				# calculated by simulation. Set times = 0 to suppress simulations.
+				glue::glue("data_output/model_h3_{x}.rds") %>%
+					read_rds() %>%
+					filter(!(city_name == "Detroit" & offense == "rape")) %>%
+					forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
+					mutate(coef_variation = map_dbl(.distribution, coef_var)) %>%
+					write_rds(glue::glue("data_output/forecast_h3_{x}.rds"),
+										compress = "gz")
+				
+				send_notification(glue::glue("Finished generating forecasts for {x}"))
+				
+			}
+		)
+		
+		send_notification("Finished estimating models for H3")
+		
+	},
+	error = function (e) send_notification(e, "error")
+=======
 # CALCULATE FORECASTS ----------------------------------------------------------
 
 system.time(
@@ -164,12 +256,32 @@ system.time(
 		},
 		.progress = TRUE
 	)
+>>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 )
 
 				
 
 # CALCULATE ACCURACY MEASURES --------------------------------------------------
 
+<<<<<<< HEAD
+# system.time({
+# 	models_by_month$accuracy <- furrr::future_pmap(
+# 		list(models_by_month$forecasts[1], models_by_month$training_data[1],
+# 				 models_by_month$test_data[1]), 
+# 		~ left_join(
+# 			accuracy(..1, rbind(..2, ..3)),
+# 			as_tibble(..1) %>% 
+# 				group_by(city_name, district, offense, .model) %>% 
+# 				summarise(coef_var = mean(coef_variation)) %>% 
+# 				ungroup(),
+# 			by = c("city_name", "district", "offense", ".model")
+# 		),
+# 		.progress = TRUE
+# 	)
+# 	
+# 	slackr_bot("Finished calculating accuracy statistics for H3")
+# })
+=======
 system.time(
 	models_by_month$accuracy <- furrr::future_pmap(
 		list(
@@ -186,12 +298,21 @@ system.time(
 	)
 )
 
+>>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 
 
 # SAVE MODELS ------------------------------------------------------------------
 
+<<<<<<< HEAD
+# SAVE MODELS
+# models_by_month %>% 
+# 	select(-models) %>%
+# 	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
+# 	write_rds("data_output/models_h3.Rds", compress = "gz")
+=======
 models_by_month %>% 
 	select(-models) %>%
 	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
 	write_rds("data_output/models_h3.Rds", compress = "gz")
+>>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 

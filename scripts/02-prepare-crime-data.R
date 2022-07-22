@@ -34,12 +34,12 @@ districts <- read_sf("data_output/police_boundaries.gpkg") %>% st_transform(2163
 crimes_with_districts <- crimes %>% 
 	st_transform(2163) %>% 
 	st_join(districts) %>% 
-	# remove geometry
+	# Remove geometry to save space
 	st_drop_geometry() %>% 
-	# remove duplicate city column
+	# Remove duplicate city column
 	select(-city)
 
 
 
 # SAVE DATA
-write_csv(crimes_with_districts, "data_output/crime_data_with_districts.csv.gz")
+write_csv(crimes_with_districts, "data_output/crime_data.csv.gz")

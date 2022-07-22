@@ -238,6 +238,32 @@ districts[["seattle"]] <- "data/seattle_district_boundaries.zip" %>%
 
 
 
+# ST LOUIS ---------------------------------------------------------------------
+# Source: https://www.stlouis-mo.gov/data/datasets/dataset.cfm?id=83
+# Note that boundaries changed in 2014, but this does not matter for the 
+# purposes of this study
+
+# Download data
+if (!file.exists("data/st_louis_district_boundaries.zip")) {
+	download.file(
+		"https://www.stlouis-mo.gov/data/boundaries/upload/STL-Police-Districts-2014-2.zip",
+		"data/st_louis_district_boundaries.zip"
+	)
+}
+
+# Process data
+districts[["st_louis"]] <- "data/st_louis_district_boundaries.zip" %>% 
+	unzip(exdir = tempdir()) %>% 
+	str_subset(".shp$") %>% 
+	# The zip file contains some macOS crud that means there are multiple
+	# shapefiles, so remove all but the first
+	head(1) %>% 
+	read_sf() %>% 
+	select(district = DISTNO) %>% 
+	mutate(city = "St Louis")
+
+
+
 # TUCSON -----------------------------------------------------------------------
 # Tucson data are in a zipped shapefile
 

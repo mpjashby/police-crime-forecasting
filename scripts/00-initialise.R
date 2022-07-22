@@ -50,7 +50,7 @@ library("tidyverse") # utility functions, **load this after all other packages**
 
 # load common helpers
 # this must be done after the packages are loaded, since it requires ggplot2
-source(here::here("../helpers.R"))
+source("https://github.com/mpjashby/r-helper/raw/main/helpers.R")
 
 
 

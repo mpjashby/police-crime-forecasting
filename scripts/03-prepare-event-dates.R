@@ -84,7 +84,7 @@ teams$nba <- tribble(
 	"Golden State Warriors", "San Francisco"
 )
 events$nba <- map_dfr(
-	2010:2019, 
+	2010:2020, 
 	game_logs, 
 	result_types = "team", 
 	season_types = c("Regular Season", "Playoffs", "Pre Season", "All Star")

@@ -1,5 +1,9 @@
 # This file applies each forecasting method for H3 to the data from each city
 
+if (!isNamespaceLoaded("tidyverse")) {
+	source(here::here("scripts/00-initialise.R"))
+}
+
 
 
 # LOAD DATA --------------------------------------------------------------------
@@ -34,24 +38,45 @@ crimes %>%
 crimes_by_month <- crimes %>% 
 	filter(!is.na(district)) %>% 
 	# Create a combined variable for city and district, and extract crime 
-	# categories of interest
+	# categories of interest. We will only keep aggravated assaults to keep
+	# computational time reasonable. Agg assaults have been chosen because there
+	# are reasonable numbers (i.e. not too few) of offences in all cities.
 	mutate(
 		date = as_date(date_single),
 		offense = case_when(
 			offense_type  == "aggravated assault" ~ "aggravated assault",
 			# offense_group == "arson" ~ "arson",
-			offense_group == "burglary/breaking & entering" ~ "burglary",
-			offense_group == "homicide offenses" ~ "homicide",
+			# offense_group == "burglary/breaking & entering" ~ "burglary",
+			# offense_group == "homicide offenses" ~ "homicide",
 			# offense_group == "larceny/theft offenses" ~ "theft",
 			# offense_type  == "rape (except statutory rape)" ~ "rape",
-			offense_group == "robbery" ~ "robbery",
+			# offense_group == "robbery" ~ "robbery",
 			# offense_group == "motor vehicle theft" ~ "vehicle theft",
 			TRUE ~ "other"
 		)
 	) %>% 
-	# Filter out cities with no data for one or more of the crimes of interest
+	# Choose one district from each city except NYC. This was done randomly using
+	# `round(runif(1, 1, n))` where `n` is the number of districts in each city,
+	# excluding special districts with very little crime (such as airports). The
+	# chosen district in each case is the nth district alphabetically, rather than
+	# the district with that number in cities that have numbered rather than named
+	# districts. Since we don't have district boundaries for Kansas City, two
+	# districts from NYC are chosen to keep the overall number of forecasts the
+	# same across Scenarios.
 	filter(
-		city_name %in% c("Detroit", "Los Angeles", "New York", "Tucson"),
+		(
+			(city_name == "Austin" & district == "BAKER") |
+				(city_name == "Chicago" & district == "19") |
+				(city_name == "Detroit" & district == "08") |
+				(city_name == "Los Angeles" & district == "DEVONSHIRE") |
+				(city_name == "Louisville" & district == "5") |
+				(city_name == "Memphis" & district == "Tillman") |
+				(city_name == "New York" & district %in% c("034", "067")) |
+				(city_name == "San Francisco" & district == "NORTHERN") |
+				(city_name == "Seattle" & district == "SW") |
+				(city_name == "St Louis" & district == "6") |
+				(city_name == "Tucson" & district == "Operations Division South")
+		),
 		offense != "other"
 	) %>% 
 	count(city_name, district, offense, date, name = "crimes") %>% 
@@ -88,13 +113,12 @@ crimes_by_month <- crimes %>%
 		count_holidays = sum(holiday, na.rm = TRUE),
 		.groups = "drop"
 	) %>%
-	as_tsibble(index = month, key = c(city_name, district, offense)) %>% 
-	filter(!(city_name == "Detroit" & offense == "rape"))
+	as_tsibble(index = month, key = c(city_name, district, offense))
 	
 # Create tsibble to hold model results and separate data into training/test sets
 models_by_month <- tsibble(
 	forecast_date = yearmonth(
-		seq(ymd("2013-01-01"), ymd("2019-01-01"), by = "months")
+		seq(ymd("2013-01-01"), by = "months", length.out = 48)
 	), 
 	index = forecast_date
 ) %>% 
@@ -120,168 +144,51 @@ rm(crimes, crimes_by_month)
 
 
 
-<<<<<<< HEAD
-# RUN MODELS
-
-tryCatch(
-	{
-		
-		furrr::future_map2(
-			models_by_month$training_data, 
-			format.Date(models_by_month$forecast_date, "%Y-%m-%d"), 
-			function (x, y) {
-				
-				if (file.exists(glue::glue("data_output/model_h3_{y}.rds")))
-					return(invisible(NULL))
-				
-				model(
-					x,
-					naive = NAIVE(crimes ~ lag()),
-					snaive = SNAIVE(crimes ~ lag("year")),
-					tslm = TSLM(crimes ~ trend() + season() + count_weekdays + 
-												count_holidays),
-					stl = decomposition_model(STL, crimes ~ trend() + season(), 
-																		ETS(season_adjust), 
-																		dcmp_args = list(robust = TRUE)),
-					ets = ETS(crimes ~ trend() + season() + error()),
-					arima = ARIMA(crimes ~ trend() + season() + count_weekdays + 
-													count_holidays),
-					neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + 
-														count_holidays),
-					fasster = FASSTER(crimes ~ poly(1) + trig(12) + ARMA() + 
-															count_weekdays + count_holidays),
-					prophet = prophet(crimes ~ growth() + season("year") + 
-															count_weekdays + count_holidays)
-				) %>% 
-					write_rds(glue::glue("data_output/model_h3_{y}.rds"), compress = "gz")
-				
-				send_notification(glue::glue("Finished estimating models for forecast ",
-																		 "date {y}"))
-				
-			}
-		)
-		
-		send_notification("Finished estimating models for H3")
-		
-	},
-	error = function (e) send_notification(e, "error"),
-	warning = function (w) send_notification(w, "warning"),
-	message = function (m) send_notification(m)
-=======
 # RUN MODELS -------------------------------------------------------------------
 
 system.time(
-	models_test <- models_by_month %>% 
-		pluck("training_data") %>% 
-		furrr::future_map(
-			model,
-			naive = NAIVE(crimes ~ lag()),
-			snaive = SNAIVE(crimes ~ lag("year")),
-			common = RW(crimes ~ lag(12) + lag(24) + lag(36)),
-			tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
-			stl = decomposition_model(STL(crimes ~ trend() + season()), ETS(season_adjust)),
-			ets = ETS(crimes ~ trend() + season() + error()),
-			arima = ARIMA(crimes ~ trend() + season() + count_weekdays + count_holidays),
-			neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + count_holidays),
-			fasster = FASSTER(crimes ~ trend() + season() + ARMA() + count_weekdays + count_holidays),
-			prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + count_holidays),
-			.options = furrr::furrr_options(seed = TRUE),
-			.progress = TRUE
-		) %>%
-		map(mutate, combo = (arima + ets + fasster + stl) / 4)
->>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
+	models_by_month$models <- furrr::future_map2(
+		models_by_month$training_data,
+		models_by_month$forecast_date,
+		function (x, y) {
+			model(
+				x, 
+				naive = NAIVE(crimes ~ lag()),
+				snaive = SNAIVE(crimes ~ lag("year")),
+				common = RW(crimes ~ lag(12) + lag(24) + lag(36)),
+				tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
+				stl = decomposition_model(STL(crimes ~ trend() + season()), ETS(season_adjust)),
+				ets = ETS(crimes ~ trend() + season() + error()),
+				arima = ARIMA(crimes ~ trend() + season() + count_weekdays + count_holidays),
+				neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + count_holidays),
+				fasster = FASSTER(crimes ~ trend() + season() + ARMA() + count_weekdays + count_holidays),
+				prophet = prophet(crimes ~ growth() + season("year") + count_weekdays + count_holidays)
+			) %>% 
+				mutate(combo = (arima + ets + fasster + stl) / 4)
+		},
+		.options = furrr::furrr_options(seed = TRUE),
+		.progress = TRUE
+	)
 )
 
 
 
-<<<<<<< HEAD
-# CALCULATE FORECASTS
-
-tryCatch(
-	{
-		
-		walk2(
-			format.Date(models_by_month$forecast_date[1], "%Y-%m-%d"), 
-			models_by_month$test_data[1], 
-			function (x, y) {
-				
-				if (file.exists(glue::glue("data_output/forecast_h3_{x}.rds"))) {
-					send_notification(glue::glue("Skipping forecasting for {x}"))
-					return(invisible(NULL))
-				}
-				
-				if (!file.exists(glue::glue("data_output/model_h3_{x}.rds"))) {
-					send_notification(glue::glue("Cannot find model file for {x}"),
-														"warning")
-					return(invisible(NULL))
-				}
-				
-				# forecast based on new data
-				# This is very slow for NNETAR() models because prediction intervals are
-				# calculated by simulation. Set times = 0 to suppress simulations.
-				glue::glue("data_output/model_h3_{x}.rds") %>%
-					read_rds() %>%
-					filter(!(city_name == "Detroit" & offense == "rape")) %>%
-					forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
-					mutate(coef_variation = map_dbl(.distribution, coef_var)) %>%
-					write_rds(glue::glue("data_output/forecast_h3_{x}.rds"),
-										compress = "gz")
-				
-				send_notification(glue::glue("Finished generating forecasts for {x}"))
-				
-			}
-		)
-		
-		send_notification("Finished estimating models for H3")
-		
-	},
-	error = function (e) send_notification(e, "error")
-=======
 # CALCULATE FORECASTS ----------------------------------------------------------
 
 system.time(
 	models_by_month$forecasts <- furrr::future_map2(
-		models_by_month$models, 
-		models_by_month$test_data, 
-		function (x, y) {
-			
-			# Forecast based on new data
-			# This is very slow for NNETAR() models because prediction intervals are
-			# calculated by simulation. Set times = 0 to suppress simulations.
-			x %>% 
-				filter(!(city_name == "Detroit" & offense == "rape")) %>% 
-				forecast(new_data = select(y, -crimes), bias_adjust = FALSE) %>%
-				mutate(coef_variation = sqrt(variance(crimes)) / abs(mean(crimes)))
-			
-		},
+		models_by_month$models,
+		models_by_month$test_data,
+		~ forecast(.x, new_data = select(.y, -crimes)),
+		.options = furrr::furrr_options(seed = TRUE),
 		.progress = TRUE
 	)
->>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 )
 
-				
+
 
 # CALCULATE ACCURACY MEASURES --------------------------------------------------
 
-<<<<<<< HEAD
-# system.time({
-# 	models_by_month$accuracy <- furrr::future_pmap(
-# 		list(models_by_month$forecasts[1], models_by_month$training_data[1],
-# 				 models_by_month$test_data[1]), 
-# 		~ left_join(
-# 			accuracy(..1, rbind(..2, ..3)),
-# 			as_tibble(..1) %>% 
-# 				group_by(city_name, district, offense, .model) %>% 
-# 				summarise(coef_var = mean(coef_variation)) %>% 
-# 				ungroup(),
-# 			by = c("city_name", "district", "offense", ".model")
-# 		),
-# 		.progress = TRUE
-# 	)
-# 	
-# 	slackr_bot("Finished calculating accuracy statistics for H3")
-# })
-=======
 system.time(
 	models_by_month$accuracy <- furrr::future_pmap(
 		list(
@@ -298,21 +205,12 @@ system.time(
 	)
 )
 
->>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 
 
 # SAVE MODELS ------------------------------------------------------------------
 
-<<<<<<< HEAD
-# SAVE MODELS
-# models_by_month %>% 
-# 	select(-models) %>%
-# 	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
-# 	write_rds("data_output/models_h3.Rds", compress = "gz")
-=======
 models_by_month %>% 
-	select(-models) %>%
-	mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
+	# select(-models) %>%
+	# mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
 	write_rds("data_output/models_h3.Rds", compress = "gz")
->>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
 

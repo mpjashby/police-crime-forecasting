@@ -167,9 +167,8 @@ system.time(
 # CALCULATE FORECASTS
 
 system.time(
-	# models_by_date$forecasts 
-	forecasts_test <- map2(
-		head(models_by_date$models, 4), head(models_by_date$forecast_date, 4),
+	models_by_date$forecasts <- map2(
+		models_by_date$models, models_by_date$forecast_date,
 		function (x, y) {
 			
 			# generate tsibble of new data for 90 days starting on the forecast date
@@ -208,7 +207,7 @@ system.time(
 				# forecast based on new data
 				# This is very slow for NNETAR() models because prediction intervals are
 				# calculated by simulation. Set times = 0 to suppress simulations.
-				forecast(z, new_data = this_new_data, bias_adjust = FALSE) %>%
+				forecast(z, new_data = this_new_data) %>%
 					mutate(
 						city_name = z$city_name,
 						coef_variation = sqrt(distributional::variance(crimes)) / abs(mean(crimes))
@@ -224,7 +223,7 @@ system.time(
 
 # CALCULATE ACCURACY MEASURES
 
-models_by_date$accuracy <- <- pmap(
+models_by_date$accuracy <- pmap(
 	list(
 		models_by_date$forecasts, 
 		models_by_date$training_data,
@@ -232,7 +231,7 @@ models_by_date$accuracy <- <- pmap(
 	),
 	function (...) {
 		map(..1, function (x) {
-			combined_data <- rbind(..2, ..3) %>% 
+			combined_data <- bind_rows(..2, ..3) %>% 
 				filter(city_name == first(x$city_name))
 			mean_cv <- as_tibble(x) %>% 
 				group_by(city_name, .model) %>% 
@@ -247,19 +246,37 @@ models_by_date$accuracy <- <- pmap(
 
 # PORTMANTEAU TESTS
 
-models_by_date$portmanteau <- map(models_by_date$models, map, function (x) {
-	x %>% 
-		augment(type = "response") %>% 
-		# lag = 10 chosen following https://robjhyndman.com/hyndsight/ljung-box-test/
-		features(.resid, portmanteau_tests, lag = 10)
-})
+models_by_date$portmanteau <- map_depth(
+	models_by_date$models, 
+	.depth = 2, 
+	function (x) {
+		x %>% 
+			augment(type = "response") %>% 
+			# lag = 10 chosen following 
+			# https://robjhyndman.com/hyndsight/ljung-box-test/
+			features(.resid, portmanteau_tests, lag = 10)
+	}
+)
 
 
 
 # SAVE MODELS
 models_by_date %>% 
-	select(-models) %>% 
-	mutate(forecasts = map_depth(forecasts, 2, 
-															 ~select(as_tibble(.), -.distribution))) %>% 
-	write_rds("data_output/models_h2.Rds", compress = "gz")
+	# select(-models) %>% 
+	# mutate(
+	# 	forecasts = map_depth(forecasts, 2, ~select(as_tibble(.), -crimes))
+	# ) %>% 
+	write_rds("data_output/models_h2_full.Rds", compress = "gz")
 
+
+
+# WRITE SUMMARY
+models_by_date %>% 
+	as_tibble() %>% 
+	select(forecast_date, accuracy) %>% 
+	# Un-nest data twice because the data for H2 had to be double nested because
+	# of the different predictors used for different cities
+	unnest(cols = "accuracy") %>% 
+	unnest(cols = "accuracy") %>% 
+	select(forecast_date, model = .model, city_name, mape = MAPE) %>%
+	write_rds("data_output/models_h2_summary.Rds", compress = "gz")

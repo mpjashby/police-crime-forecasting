@@ -16,13 +16,13 @@ if (!isNamespaceLoaded("tidyverse")) {
 crimes <- get_crime_data(
 	# 3 years training + 3 years test
 	years = 2010:2019, 
-	cities = c(
-		"Austin", "Chicago", "Detroit", "Kansas City", "Los Angeles", "Louisville", 
-		"Memphis", "New York", "San Francisco", "Seattle", "St Louis", "Tucson"
-	),
 	type = "core",
 	output = "sf"
 ) %>% 
+	filter(city_name %in% c(
+		"Austin", "Chicago", "Detroit", "Kansas City", "Los Angeles", "Louisville", 
+		"Memphis", "New York", "San Francisco", "Seattle", "St Louis", "Tucson"
+	)) %>%
 	select(-uid, -date_start, -date_end, -census_block, -location_type, 
 				 -location_category)
 

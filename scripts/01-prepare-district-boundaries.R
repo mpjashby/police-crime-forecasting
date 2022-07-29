@@ -12,10 +12,10 @@ districts <- list()
 
 # download data
 if (!file.exists("data/austin_district_boundaries.zip")) {
-	download.file(str_glue(
+	download.file(
 		"https://data.austintexas.gov/api/geospatial/9jeg-fsk5?method=export&format=Shapefile", 
 		"data/austin_district_boundaries.zip"
-	))
+	)
 }
 
 # process data
@@ -39,10 +39,10 @@ districts[["austin"]] <- "data/austin_district_boundaries.zip" %>%
 
 # download data
 if (!file.exists("data/chicago_district_boundaries.geojson")) {
-	download.file(str_glue(
+	download.file(
 		"https://data.cityofchicago.org/api/geospatial/fthy-xz3r?method=export&format=GeoJSON", 
 		"data/chicago_district_boundaries.geojson"
-	))
+	)
 }
 
 # process data
@@ -57,10 +57,10 @@ districts[["chicago"]] <- read_sf("data/chicago_district_boundaries.geojson") %>
 # download data
 # Detroit data are in a zipped shapefile.
 if (!file.exists("data/detroit_district_boundaries.zip")) {
-	download.file(str_glue(
+	download.file(
 		"https://opendata.arcgis.com/datasets/d99a3244a8ab4d81911c81ef8a18c7d1_0.zip?outSR=%7B%22latestWkid%22%3A2898%2C%22wkid%22%3A2898%7D", 
 		"data/detroit_district_boundaries.zip"
-	))
+	)
 }
 
 # process data

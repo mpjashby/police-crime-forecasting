@@ -51,16 +51,7 @@ library("tidyverse") # utility functions, **load this after all other packages**
 
 # load common helpers
 # this must be done after the packages are loaded, since it requires ggplot2
-<<<<<<< HEAD
-source("https://github.com/mpjashby/r-helper/raw/main/helpers.R")
-=======
 source("https://raw.githubusercontent.com/mpjashby/r-helper/main/helpers.R")
->>>>>>> 01d118cdf5eae0c48688065001e7c55f9a0e4d2b
-
-
-
-# setup slackr
-# slackr_setup()
 
 
 

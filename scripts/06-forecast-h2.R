@@ -3,6 +3,12 @@
 
 
 
+if (!isNamespaceLoaded("tidyverse")) {
+	source(here::here("scripts/00-initialise.R"))
+}
+
+
+
 # SET SEED
 # since we will be using sample_n() to choose the dates on which to make the
 # forecasts, we can set a seed here to make the sample reproducible
@@ -10,26 +16,23 @@ set.seed(123)
 
 
 
-# LOAD DATA
+# LOAD DATA --------------------------------------------------------------------
 
 if (!exists("crimes")) {
 	crimes <- read_csv("data_output/crime_data.csv.gz") %>% 
 		filter(!is.na(date_single))
 }
-
 if (!exists("event_dates")) {
 	event_dates <- read_csv("data_output/event_data.csv.gz")
 }
 
 
 
-# PREPARE DATA
+# PREPARE DATA -----------------------------------------------------------------
 
-# get range of dates for crime data
-date_range <- lubridate::interval(
-	as_date(min(crimes$date_single)), 
-	as_date(max(crimes$date_single))
-)
+# Set range of dates for crime data, based on 3 years of training data and 4
+# years of test data
+date_range <- lubridate::interval(dmy("1 Jan 2010"), dmy("31 Dec 2019"))
 
 # get holiday dates
 holiday_dates <- tibble(
@@ -52,9 +55,6 @@ crimes_by_date <- crimes %>%
 		date = as_date(ifelse(hour(date_single) < 6, date - days(1), date))
 	) %>% 
 	count(city_name, date, name = "crimes") %>%
-	# some crimes will now be recorded on the last day of the year before the 
-	# start of the study period, so we remove these
-  filter(date %within% date_range) %>%
 	left_join(holiday_dates, by = "date") %>% 
 	left_join(black_fridays, by = "date") %>% 
 	left_join(event_dates, by = c("date", "city_name")) %>% 
@@ -74,25 +74,37 @@ crimes_by_date <- crimes %>%
 		month_last = mday(date + days(1)) == 1,
 		year_last = yday(date + days(1)) == 1
 	) %>%
+	# some crimes will now be recorded on the last day of the year before the 
+	# start of the study period, so we remove these
+	filter(date %within% date_range) %>%
 	as_tsibble(index = date, key = city_name)
 
 models_by_date <- tibble(
 	forecast_date = seq(
-		as_date(min(crimes$date_single) + years(3)), 
-		as_date(max(crimes$date_single) - days(90)), 
+		min(crimes_by_date$date) + years(3), 
+		min(crimes_by_date$date) + years(3) + months(47), 
 		by = "days"
 	)
 ) %>% 
-	sample_n(100, replace = FALSE) %>% 
+	# Select a single day from each month for 48 months to create the same number
+	# of comparisons as in the other Scenarios.
+	mutate(
+		month = month(forecast_date, label = TRUE), 
+		year = year(forecast_date)
+	) %>% 
+	group_by(year, month) %>% 
+	sample_n(1) %>% 
+	ungroup() %>% 
+	select(-month, -year) %>% 
 	arrange(forecast_date) %>% 
 	mutate(
 		training_data = map(
 			forecast_date, 
-			~ filter(crimes_by_date, between(date, . - years(3), .))
+			~ filter(crimes_by_date, between(date, . - years(3), . - days(1)))
 		),
 		test_data = map(
 			forecast_date,
-			~ filter(crimes_by_date, between(date, . + days(1), . + days(90)))
+			~ filter(crimes_by_date, between(date, ., . + days(90)))
 		)
 	)
 
@@ -120,25 +132,26 @@ models_by_date <- tibble(
 # Set up parallel processing
 future::plan("multisession")
 
+# remove crimes object because it is too big to copy to each parallel instance
+rm(crimes, crimes_by_date)
+
 system.time(
-	models_by_date$models <- map(
-		models_by_date$training_data, function (x) {
+	models_by_date$models <- furrr::future_map(
+		models_by_date$training_data, 
+		function (x) {
 			map(as.character(unique(x$city_name)), function (y) {
 				
 				# Remove constant variables
 				training_data <- x %>% 
 					filter(city_name == y) %>% 
 					select(!where(is_constant))
-					# select_if(~ !isTRUE(all.equal(., rep(FALSE, length(.)))))
-
-				# Get names of logical variables
+				
+				# Get names of non-constant logical variables, which will be included
+				# in the model formulae
 				xreg_vars <- training_data %>% 
 					as_tibble() %>% 
 					select(where(is.logical)) %>% 
 					names()
-				
-				# message("\nRetaining variables ", paste(xreg_vars, collapse = ", "),
-				# 				" and key ", key(training_data), appendLF = TRUE)
 				
 				model(
 					training_data,
@@ -158,8 +171,11 @@ system.time(
 						combo = (arima + prophet + tslm) / 3
 					)
 				
-		})
-	})
+			})
+		},
+		.options = furrr::furrr_options(seed = TRUE),
+		.progress = TRUE
+	)
 )
 
 
@@ -167,40 +183,13 @@ system.time(
 # CALCULATE FORECASTS
 
 system.time(
-	models_by_date$forecasts <- map2(
-		models_by_date$models, models_by_date$forecast_date,
+	models_by_date$forecasts <- furrr::future_map2(
+		models_by_date$models, models_by_date$test_data,
 		function (x, y) {
-			
-			# generate tsibble of new data for 90 days starting on the forecast date
-			new_data <- expand_grid(
-				city_name = map_chr(x, ~ .$city_name),
-				date = seq.Date(y, y + days(89), by = "days")
-			) %>% 
-				arrange(city_name, date) %>% 
-				left_join(holiday_dates, by = "date") %>% 
-				left_join(black_fridays, by = "date") %>% 
-				left_join(event_dates, by = c("date", "city_name")) %>% 
-				mutate(
-					halloween = month(date) == 10 & mday(date) == 31,
-					month_last = mday(date + days(1)) == 1,
-					year_last = yday(date + days(1)) == 1
-				) %>%
-				replace_na(list(
-					holiday = FALSE, 
-					black_friday = FALSE,
-					nfl = FALSE,
-					mlb = FALSE,
-					nba = FALSE,
-					nhl = FALSE,
-					mls = FALSE,
-					auto = FALSE,
-					fbs = FALSE
-				)) %>% 
-				as_tsibble(index = date, key = city_name)
 			
 			map(x, function (z) {
 				
-				this_new_data <- new_data %>% 
+				this_new_data <- y %>% 
 					filter(city_name == z$city_name) %>% 
 					select_at(vars(c("date", training_vars(z))))
 				
@@ -215,7 +204,9 @@ system.time(
 				
 			})
 		
-		}
+		},
+		.options = furrr::furrr_options(seed = TRUE),
+		.progress = TRUE
 	)
 )
 

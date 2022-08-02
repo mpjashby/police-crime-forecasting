@@ -214,3 +214,32 @@ models_by_month %>%
 	# mutate(forecasts = map(forecasts, ~select(as_tibble(.), -.distribution))) %>%
 	write_rds("data_output/models_h3.Rds", compress = "gz")
 
+
+
+# SAVE FORECASTS AND ERRORS ----------------------------------------------------
+
+forecasts_by_date <- models_by_date |> 
+	pluck("forecasts") |> 
+	set_names(nm = models_by_date$forecast_date) |> 
+	map_dfr(as_tibble, .id = "forecast_date")
+
+models_by_date %>% 
+	pluck("test_data") %>% 
+	set_names(nm = models_by_date$forecast_date) %>% 
+	map_dfr(as_tibble, .id = "forecast_date") %>% 
+	select(city_name, forecast_date, month, actual = crimes) %>% 
+	right_join(
+		forecasts_by_date, 
+		by = c("forecast_date", "city_name", "month")
+	) %>% 
+	mutate(forecast_date = ym(forecast_date)) %>% 
+	select(
+		city_name, 
+		forecast_date, 
+		model = .model, 
+		month, 
+		actual, 
+		forecast = .mean
+	) %>% 
+	write_rds(here::here("data_output/models_h3_forecasts.Rds"), compress = "gz")
+

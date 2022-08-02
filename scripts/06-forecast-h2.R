@@ -129,11 +129,11 @@ models_by_date <- tibble(
 # so the right-hand side of the regression formula varies for each city and must
 # be constructed separately
 
-# Set up parallel processing
-future::plan("multisession")
-
 # remove crimes object because it is too big to copy to each parallel instance
 rm(crimes, crimes_by_date)
+
+# Set up parallel processing
+future::plan("multisession")
 
 system.time(
 	models_by_date$models <- furrr::future_map(
@@ -179,15 +179,23 @@ system.time(
 )
 
 
+# Return to sequential operation to make sure all the processes being used by
+# the code above have ended. Then activate parallel processing again for the 
+# next part of the code.
+future::plan("sequential")
+future::plan("multisession")
+
+
 
 # CALCULATE FORECASTS
 
 system.time(
-	models_by_date$forecasts <- furrr::future_map2(
-		models_by_date$models, models_by_date$test_data,
+	furrr::future_walk2(
+		models_by_date$models, 
+		models_by_date$test_data,
 		function (x, y) {
 			
-			map(x, function (z) {
+			these_models <- map(x, function (z) {
 				
 				this_new_data <- y %>% 
 					filter(city_name == z$city_name) %>% 
@@ -203,12 +211,23 @@ system.time(
 					)
 				
 			})
+			
+			write_rds(
+				these_models, 
+				file = here::here(str_glue("data_output/models_h2/models_{as.character(y$date[[1]])}.Rds")), 
+				compress = "gz"
+			)
 		
 		},
 		.options = furrr::furrr_options(seed = TRUE),
 		.progress = TRUE
 	)
 )
+
+# Load saved models
+models_by_date$forecasts <- here::here("data_output/models_h2/") %>%
+	dir(full.names = TRUE) %>%
+	map(read_rds)
 
 
 
@@ -257,7 +276,7 @@ models_by_date %>%
 	# mutate(
 	# 	forecasts = map_depth(forecasts, 2, ~select(as_tibble(.), -crimes))
 	# ) %>% 
-	write_rds("data_output/models_h2_full.Rds", compress = "gz")
+	write_rds("data_output/models_h2.Rds", compress = "gz")
 
 
 
@@ -271,3 +290,33 @@ models_by_date %>%
 	unnest(cols = "accuracy") %>% 
 	select(forecast_date, model = .model, city_name, mape = MAPE) %>%
 	write_rds("data_output/models_h2_summary.Rds", compress = "gz")
+
+
+
+# SAVE FORECASTS AND ERRORS ----------------------------------------------------
+
+forecasts_by_date <- models_by_date |> 
+	pluck("forecasts") |> 
+	set_names(nm = models_by_date$forecast_date) |> 
+	map_depth(.depth = 2, as_tibble) |> 
+	map_dfr(bind_rows, .id = "forecast_date")
+
+models_by_date %>% 
+	pluck("test_data") %>% 
+	set_names(nm = models_by_date$forecast_date) %>% 
+	map_dfr(as_tibble, .id = "forecast_date") %>% 
+	select(city_name, forecast_date, date, actual = crimes) %>% 
+	right_join(
+		forecasts_by_date, 
+		by = c("forecast_date", "city_name", "date")
+	) %>% 
+	mutate(forecast_date = ymd(forecast_date)) %>% 
+	select(
+		city_name, 
+		forecast_date, 
+		model = .model, 
+		date, 
+		actual, 
+		forecast = .mean
+	) %>% 
+	write_rds(here::here("data_output/models_h2_forecasts.Rds"), compress = "gz")

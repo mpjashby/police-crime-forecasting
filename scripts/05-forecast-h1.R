@@ -2,7 +2,7 @@
 
 
 
-# LOAD DATA
+# LOAD DATA --------------------------------------------------------------------
 
 # load data
 if (!exists("crimes")) {
@@ -19,7 +19,7 @@ if (!exists("crimes")) {
 
 
 
-# PREPARE DATA
+# PREPARE DATA -----------------------------------------------------------------
 
 # get holiday dates
 holiday_dates <- tibble(
@@ -62,7 +62,9 @@ write_rds(crimes_by_month, here::here("data_output/monthly_crime_counts.rds"))
 # the form of a tsibble of dates, which can be populated with training and test
 # data for the appropriate periods from the main crimes dataset.
 models_by_month <- tsibble(
-	forecast_date = yearmonth(seq(ymd("2013-01-01"), ymd("2017-01-01"), by = "months")), 
+	forecast_date = yearmonth(
+		seq(ymd("2013-01-01"), ymd("2017-01-01"), by = "months")
+	), 
 	index = forecast_date
 ) %>% 
 	mutate(
@@ -94,7 +96,7 @@ models_by_month <- tsibble(
 
 
 
-# RUN MODELS
+# RUN MODELS -------------------------------------------------------------------
 
 # Remove the raw crime data because otherwise it causes problems when the 
 # `future` package sets up multiple sessions on account of `crimes` being very
@@ -128,14 +130,15 @@ system.time(
 
 
 
-# CALCULATE FORECASTS
+# CALCULATE FORECASTS ----------------------------------------------------------
 
 system.time(
 	models_by_month$forecasts <- furrr::future_map2(
-		models_by_month$models, models_by_month$forecast_date,
+		models_by_month$models, 
+		models_by_month$forecast_date,
 		function (x, y) {
 			
-			message(str_glue("Generating forecasts starting in {format(y, '%b %Y')}"))
+			rlang::inform(str_glue("Generating forecasts starting in {format(y, '%b %Y')}\n"))
 			
 			# generate tsibble of new data for 3 years starting on the forecast date
 			new_data <- expand_grid(
@@ -159,10 +162,8 @@ system.time(
 			# This is very slow for NNETAR() models because prediction intervals are
 			# calculated by simulation. Set times = 0 to suppress simulations.
 			x %>% 
-				forecast(new_data = new_data) %>%
-				mutate(
-					coef_variation = sqrt(distributional::variance(crimes)) / abs(mean(crimes))
-				)
+				forecast(new_data = new_data, times = 0) %>%
+				mutate(coef_variation = sqrt(variance(crimes)) / abs(mean(crimes)))
 			
 		},
 		.options = furrr::furrr_options(seed = TRUE),
@@ -172,7 +173,7 @@ system.time(
 
 
 
-# CALCULATE ACCURACY MEASURES
+# CALCULATE ACCURACY MEASURES --------------------------------------------------
 
 models_by_month$accuracy <- pmap(
 	list(
@@ -180,18 +181,25 @@ models_by_month$accuracy <- pmap(
 		models_by_month$training_data,
 		models_by_month$test_data
 	), 
-	~ left_join(
-		accuracy(..1, bind_rows(..2, ..3)),
-		as_tibble(..1) %>% 
-			group_by(city_name, .model) %>% 
-			summarise(coef_var = mean(coef_variation), .groups = "drop"),
-		by = c("city_name", ".model")
+	~ accuracy(
+		object = ..1,
+		data = bind_rows(..2, ..3),
+		measures = list(point_accuracy_measures, distribution_accuracy_measures)
 	)
+	# ~ left_join(
+	# 	# Calculate accuracy measures
+	# 	accuracy(object = ..1, data = bind_rows(..2, ..3)),
+	# 	# Calculate mean co-efficient of variation
+	# 	as_tibble(..1) %>% 
+	# 		group_by(city_name, .model) %>% 
+	# 		summarise(coef_var = mean(coef_variation), .groups = "drop"),
+	# 	by = c("city_name", ".model")
+	# )
 )
 
 
 
-# PORTMANTEAU TESTS
+# PORTMANTEAU TESTS ------------------------------------------------------------
 
 models_by_month$portmanteau <- map(models_by_month$models, function (x) {
 	x %>% 
@@ -202,9 +210,47 @@ models_by_month$portmanteau <- map(models_by_month$models, function (x) {
 
 
 
-# SAVE MODELS
+# SAVE MODELS ------------------------------------------------------------------
 models_by_month %>% 
 	# select(-models) %>% 
 	# mutate(forecasts = map(forecasts, ~ select(as_tibble(.), -crimes))) %>% 
 	write_rds("data_output/models_h1.Rds", compress = "gz")
 
+
+
+# SAVE FORECASTS AND ERRORS ----------------------------------------------------
+
+forecasts_by_month <- models_by_month %>% 
+	pluck("forecasts") %>% 
+	set_names(nm = models_by_month$forecast_date) %>% 
+	map_dfr(as_tibble, .id = "forecast_date")
+
+models_by_month %>% 
+	pluck("test_data") %>% 
+	set_names(nm = models_by_month$forecast_date) %>% 
+	map_dfr(as_tibble, .id = "forecast_date") %>% 
+	select(city_name, forecast_date, month, actual = crimes) %>% 
+	right_join(
+		forecasts_by_month, 
+		by = c("forecast_date", "city_name", "month")
+	) %>% 
+	mutate(forecast_date = ym(forecast_date)) %>% 
+	select(
+		city_name, 
+		forecast_date, 
+		model = .model, 
+		month, 
+		actual, 
+		forecast = .median
+	) %>% 
+	write_rds(here::here("data_output/models_h1_forecasts.Rds"), compress = "gz")
+
+
+
+# WRITE SUMMARY ----------------------------------------------------------------
+models_by_month %>% 
+	as_tibble() %>% 
+	select(forecast_date, accuracy) %>% 
+	unnest(cols = "accuracy") %>% 
+	select(forecast_date, model = .model, city_name, mape = MAPE) %>%
+	write_rds("data_output/models_h1_summary.Rds", compress = "gz")

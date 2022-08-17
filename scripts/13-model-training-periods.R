@@ -97,15 +97,28 @@ system.time(
 		)
 )
 
+write_rds(models_by_month, "data_output/models_training_periods.Rds", compress = "gz")
+
 
 
 # MAKE FORECASTS ---------------------------------------------------------------
 
+models_dir <- here::here("data_output/models_training_periods")
+
+if (!dir.exists(models_dir)) dir.create(models_dir)
+
 system.time(
-	models_by_month$forecasts <- furrr::future_map2(
-		models_by_month$models, 
-		models_by_month$test_data,
-		~ forecast(.x, new_data = select(.y, -crimes)),
+	furrr::future_walk2(
+		head(models_by_month$models, 1), 
+		head(models_by_month$test_data, 1),
+		function (x, y) {
+			x %>% 
+				forecast(new_data = select(y, -crimes)) %>%
+				write_rds(
+					str_glue("{models_dir}/models_tp_{as.character(y$date[[1]])}.Rds"), 
+					compress = "gz"
+				)
+		}
 		.options = furrr::furrr_options(seed = TRUE),
 		.progress = TRUE
 	)

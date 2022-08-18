@@ -67,6 +67,10 @@ models_by_month <- expand_grid(
 	) %>% 
 	arrange(forecast_date)
 
+models_dir <- here::here("data_output/models_training_periods")
+
+if (!dir.exists(models_dir)) dir.create(models_dir)
+
 
 
 # ESTIMATE MODELS --------------------------------------------------------------
@@ -80,48 +84,72 @@ rm(crimes)
 future::plan("multisession")
 
 system.time(
-	models_by_month$models <- models_by_month %>% 
-		pluck("training_data") %>% 
-		furrr::future_map(
-			model,
-			naive = NAIVE(crimes ~ lag()),
-			snaive = SNAIVE(crimes ~ lag(12)),
-			common = RW(crimes ~ lag(12) + lag(24) + lag(36)),
-			tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
-			stl = decomposition_model(STL(crimes ~ trend() + season()), ETS(season_adjust)),
-			ets = ETS(crimes ~ trend() + season() + error()),
-			arima = ARIMA(crimes ~ trend() + season() + count_weekdays + count_holidays),
-			neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + count_holidays),
-			.options = furrr::furrr_options(seed = TRUE),
-			.progress = TRUE
-		)
+	furrr::future_pwalk(
+		list(
+			pluck(models_by_month, "training_data"),
+			pluck(models_by_month, "forecast_date"),
+			pluck(models_by_month, "periods")
+		),
+		function(x, y, z) {
+			x %>%
+				model(
+					naive = NAIVE(crimes ~ lag()),
+					snaive = SNAIVE(crimes ~ lag(12)),
+					tslm = TSLM(crimes ~ trend() + season() + count_weekdays + count_holidays),
+					stl = decomposition_model(STL(crimes ~ trend() + season()), ETS(season_adjust)),
+					ets = ETS(crimes ~ trend() + season() + error()),
+					arima = ARIMA(crimes ~ trend() + season() + count_weekdays + count_holidays),
+					neural = NNETAR(crimes ~ trend() + season() + AR() + count_weekdays + count_holidays),
+				) %>%
+				write_rds(
+					str_glue(
+						"{models_dir}/models_tp_{str_replace_all(y, ' ', '_')}_",
+						"{str_pad(z, width = 2, side = 'left', pad = 0)}.Rds"
+					), 
+					compress = "gz"
+				)
+		},
+		.options = furrr::furrr_options(seed = TRUE, globals = "models_dir"),
+		.progress = TRUE
+	)
 )
-
-write_rds(models_by_month, "data_output/models_training_periods.Rds", compress = "gz")
 
 
 
 # MAKE FORECASTS ---------------------------------------------------------------
 
-models_dir <- here::here("data_output/models_training_periods")
-
-if (!dir.exists(models_dir)) dir.create(models_dir)
-
 system.time(
-	furrr::future_walk2(
-		head(models_by_month$models, 1), 
-		head(models_by_month$test_data, 1),
-		function (x, y) {
-			x %>% 
-				forecast(new_data = select(y, -crimes)) %>%
-				write_rds(
-					str_glue("{models_dir}/models_tp_{as.character(y$date[[1]])}.Rds"), 
-					compress = "gz"
-				)
-		}
-		.options = furrr::furrr_options(seed = TRUE),
-		.progress = TRUE
-	)
+	here::here("data_output/models_training_periods") %>%
+		dir(pattern = "^models", full.names = TRUE) %>%
+		furrr::future_walk(
+			function(x) {
+				
+				this_model <- read_rds(x)
+				
+				this_date <- lubridate::as_date(last(this_model$snaive[[1]]$data$month)) + months(1)
+				
+				this_data <- models_by_month %>% 
+					filter(lubridate::as_date(forecast_date) == this_date) %>% 
+					pluck("test_data", 1) %>%
+					select(-crimes)
+				
+				this_model %>% 
+					fabletools::forecast(new_data = this_data) %>% 
+					write_rds(
+						stringr::str_glue(
+							"{models_dir}/forecasts_tp_{as.character(this_date)}_",
+							"{stringr::str_pad(nrow(this_model$snaive[[1]]$data), width = 2, side = 'left', pad = 0)}.Rds"
+						), 
+						compress = "gz"
+					)
+				
+			},
+			.options = furrr::furrr_options(
+				seed = TRUE, 
+				globals = c("models_dir", "models_by_month")
+			),
+			.progress = TRUE
+		)
 )
 
 

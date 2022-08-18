@@ -78,7 +78,7 @@ if (!dir.exists(models_dir)) dir.create(models_dir)
 # Remove the raw crime data because otherwise it causes problems when the 
 # `future` package sets up multiple sessions on account of `crimes` being very
 # large
-rm(crimes)
+rm(crimes, crimes_by_month, holiday_dates)
 
 # Set up parallel processing
 future::plan("multisession")
@@ -119,37 +119,30 @@ system.time(
 # MAKE FORECASTS ---------------------------------------------------------------
 
 system.time(
-	here::here("data_output/models_training_periods") %>%
-		dir(pattern = "^models", full.names = TRUE) %>%
-		furrr::future_walk(
-			function(x) {
-				
-				this_model <- read_rds(x)
-				
-				this_date <- lubridate::as_date(last(this_model$snaive[[1]]$data$month)) + months(1)
-				
-				this_data <- models_by_month %>% 
-					filter(lubridate::as_date(forecast_date) == this_date) %>% 
-					pluck("test_data", 1) %>%
-					select(-crimes)
-				
-				this_model %>% 
-					fabletools::forecast(new_data = this_data) %>% 
-					write_rds(
-						stringr::str_glue(
-							"{models_dir}/forecasts_tp_{as.character(this_date)}_",
-							"{stringr::str_pad(nrow(this_model$snaive[[1]]$data), width = 2, side = 'left', pad = 0)}.Rds"
-						), 
-						compress = "gz"
-					)
-				
-			},
-			.options = furrr::furrr_options(
-				seed = TRUE, 
-				globals = c("models_dir", "models_by_month")
-			),
-			.progress = TRUE
-		)
+	furrr::future_pwalk(
+		models_by_month,
+		function(forecast_date, periods, training_data, test_data) {
+			
+			models_dir <- here::here("data_output/models_training_periods")
+			this_file <- here::here(str_glue(
+				"data_output/models_training_periods/forecasts_tp_",
+				"{str_replace_all(forecast_date, ' ', '_')}_",
+				str_pad(periods, width = 2, side = 'left', pad = 0),
+				".Rds"
+			))
+			
+			if (file.exists(this_file)) return(NULL)
+			
+			this_file %>%
+				str_replace("forecasts_tp", "models_tp") %>% 
+				read_rds() %>% 
+				forecast(new_data = test_data) %>% 
+				write_rds(this_file, compress = "gz")
+			
+		},
+		.options = furrr::furrr_options(seed = TRUE),
+		.progress = TRUE
+	)
 )
 
 

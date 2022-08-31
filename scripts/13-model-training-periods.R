@@ -154,3 +154,47 @@ write_rds(
 	"data_output/models_training_periods.Rds", 
 	compress = "gz"
 )
+
+
+
+# SAVE FORECASTS ---------------------------------------------------------------
+
+models_by_month %>% 
+	select(forecast_date, periods, test_data) %>% 
+	furrr::future_pmap_dfr(
+		function(forecast_date, periods, test_data) {
+			
+			test_data <- select(test_data, city_name, month, actual = crimes)
+			
+			str_glue(
+				"data_output/models_training_periods/forecasts_tp_",
+				str_replace_all(forecast_date, ' ', '_'),
+				"_",
+				str_pad(periods, width = 2, side = 'left', pad = 0),
+				".Rds"
+			) %>% 
+				here::here() %>%  
+				read_rds() %>% 
+				mutate(
+					forecast_date = forecast_date, 
+					periods = periods
+				) %>% 
+				left_join(test_data, by = c("city_name", "month")) %>%
+				as_tibble() %>%
+				select(
+					city_name, 
+					forecast_date, 
+					periods,
+					model = .model, 
+					month, 
+					actual, 
+					forecast = .mean
+				)
+			
+		}
+	) %>%
+	write_rds(
+		here::here("data_output/models_training_periods_forecasts.Rds"), 
+		compress = "gz"
+	)
+

@@ -41,3 +41,7 @@ rsconnect/
 # large data files
 data_output/crime_data.csv.gz
 
+# Temporary data files
+data_output/models_h2/
+data_output/models_h3/
+data_output/models_training_periods/

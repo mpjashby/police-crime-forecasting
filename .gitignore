@@ -38,8 +38,14 @@ rsconnect/
 
 
 
+# original data
+data/
+
 # large data files
-data_output/crime_data.csv.gz
+data_output/
+
+# draft manuscripts
+documents/
 
 # Temporary data files
 data_output/models_h2/

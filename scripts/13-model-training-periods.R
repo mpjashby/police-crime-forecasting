@@ -86,7 +86,7 @@ crimes_by_date <- crimes %>%
 	) %>%
 	# some crimes will now be recorded on the last day of the year before the 
 	# start of the study period, so we remove these
-	filter(date %within% interval(dmy("1 Jan 2010"), dmy("31 Dec 2019"))) %>%
+	filter(date %within% lubridate::interval(dmy("1 Jan 2010"), dmy("31 Dec 2019"))) %>%
 	as_tsibble(index = date, key = city_name)
 
 
@@ -211,7 +211,7 @@ models_h2 <- tibble(
 		training_data = map2(
 			forecast_date, 
 			periods,
-			~ filter(crimes_by_date, between(date, .x - days(.y), .x - days(1)))
+			~ filter(crimes_by_date, between(date, .x - weeks(.y), .x - days(1)))
 		),
 		test_data = map(
 			as_date(forecast_date),

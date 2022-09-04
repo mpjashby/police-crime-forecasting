@@ -422,7 +422,7 @@ furrr::future_pwalk(
 
 ## Scenario 2 ----
 furrr::future_pwalk(
-	models_h2,
+	head(models_h2, 2),
 	function(forecast_date, periods, training_data, test_data) {
 		
 		this_file <- here::here(str_glue(

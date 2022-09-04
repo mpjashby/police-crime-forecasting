@@ -330,24 +330,24 @@ models_h2 %>%
 					)
 
 					# Estimate models
-					data_for_model %>% 
-						model(
-							naive = NAIVE(crimes ~ lag()),
-							snaive = SNAIVE(crimes ~ lag("week")),
-							tslm = TSLM(as.formula(this_formula)),
-							stl = decomposition_model(
-								STL(crimes ~ trend() + season()), 
-								ETS(season_adjust), 
-								ETS(season_year)
-							),
-							ets = ETS(crimes ~ trend() + season() + error()),
-							arima = ARIMA(as.formula(this_formula)),
-							neural = NNETAR(
-								as.formula(str_glue("{this_formula} + AR()")), 
-								MaxNWts = 2000, 
-								scale_inputs = FALSE
-							),
+					model(
+						data_for_model,
+						naive = NAIVE(crimes ~ lag()),
+						snaive = SNAIVE(crimes ~ lag("week")),
+						tslm = TSLM(as.formula(this_formula)),
+						stl = decomposition_model(
+							STL(crimes ~ trend() + season()), 
+							ETS(season_adjust), 
+							ETS(season_year)
+						),
+						ets = ETS(crimes ~ trend() + season() + error()),
+						arima = ARIMA(as.formula(this_formula)),
+						neural = NNETAR(
+							as.formula(str_glue("{this_formula} + AR()")), 
+							MaxNWts = 2000, 
+							scale_inputs = FALSE
 						)
+					)
 					
 				}) %>% 
 				write_rds(this_file, compress = "gz")
@@ -422,7 +422,7 @@ furrr::future_pwalk(
 
 ## Scenario 2 ----
 furrr::future_pwalk(
-	models_h2,
+	head(models_h2, 2),
 	function(forecast_date, periods, training_data, test_data) {
 		
 		this_file <- here::here(str_glue(
@@ -434,10 +434,21 @@ furrr::future_pwalk(
 		
 		if (file.exists(this_file)) return(NULL)
 		
-		this_file %>%
+		this_model <- this_file %>%
 			str_replace("forecasts_tp", "models_tp") %>% 
-			read_rds() %>% 
-			map(forecast, new_data = test_data) %>% 
+			read_rds()
+		
+		1:length(this_model) %>% 
+			set_names(nm = names(this_model)) %>% 
+			map(function(i) {
+				
+				new_data <- test_data %>% 
+					filter(city_name == names(this_model)[i]) %>% 
+					select(-city_name)
+				
+				forecast(this_model[i], new_data = new_data)
+				
+			}) %>% 
 			write_rds(this_file, compress = "gz")
 		
 	},

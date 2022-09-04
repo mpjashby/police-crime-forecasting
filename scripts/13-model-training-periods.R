@@ -420,6 +420,32 @@ furrr::future_pwalk(
 )
 
 
+## Scenario 2 ----
+furrr::future_pwalk(
+	models_h2,
+	function(forecast_date, periods, training_data, test_data) {
+		
+		this_file <- here::here(str_glue(
+			"data_output/models_training_periods/h2_forecasts_tp_",
+			"{str_replace_all(forecast_date, ' ', '_')}_",
+			str_pad(periods, width = 2, side = 'left', pad = 0),
+			".Rds"
+		))
+		
+		if (file.exists(this_file)) return(NULL)
+		
+		this_file %>%
+			str_replace("forecasts_tp", "models_tp") %>% 
+			read_rds() %>% 
+			map(forecast, new_data = test_data) %>% 
+			write_rds(this_file, compress = "gz")
+		
+	},
+	.options = furrr::furrr_options(seed = TRUE),
+	.progress = TRUE
+)
+
+
 ## Scenario 3 ----
 furrr::future_pwalk(
 	models_h3,

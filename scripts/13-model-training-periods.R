@@ -443,10 +443,10 @@ furrr::future_pwalk(
 			map(function(i) {
 				
 				new_data <- test_data %>% 
-					filter(city_name == names(this_model)[i]) %>% 
+					filter(city_name == names(this_model)[[i]]) %>% 
 					select(-city_name)
 				
-				forecast(this_model[i], new_data = new_data)
+				forecast(this_model[[i]], new_data = new_data)
 				
 			}) %>% 
 			write_rds(this_file, compress = "gz")
